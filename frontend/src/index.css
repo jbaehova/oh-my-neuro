@@ -1,0 +1,78 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 25% 98%;
+    --foreground: 222 32% 12%;
+    --muted: 210 18% 93%;
+    --muted-foreground: 215 12% 42%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 32% 12%;
+    --border: 214 20% 86%;
+    --input: 214 20% 86%;
+    --primary: 172 56% 29%;
+    --primary-foreground: 180 28% 96%;
+    --secondary: 214 22% 92%;
+    --secondary-foreground: 222 22% 18%;
+    --accent: 43 90% 55%;
+    --accent-foreground: 222 32% 12%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 172 56% 29%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 218 24% 10%;
+    --foreground: 210 22% 96%;
+    --muted: 217 20% 17%;
+    --muted-foreground: 215 14% 68%;
+    --popover: 218 23% 12%;
+    --popover-foreground: 210 22% 96%;
+    --border: 216 18% 22%;
+    --input: 216 18% 22%;
+    --primary: 174 64% 43%;
+    --primary-foreground: 218 24% 10%;
+    --secondary: 217 20% 17%;
+    --secondary-foreground: 210 22% 96%;
+    --accent: 43 90% 58%;
+    --accent-foreground: 218 24% 10%;
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 174 64% 43%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    letter-spacing: 0;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .surface {
+    @apply border border-border bg-white/[0.74] shadow-sm shadow-slate-900/5 dark:bg-white/[0.035] dark:shadow-black/20;
+  }
+
+  .mono {
+    @apply font-mono text-[12px];
+  }
+
+  .scrollbar-soft {
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+  }
+}
