@@ -1,0 +1,59 @@
+app:
+  name: oh-my-neuro
+  environment: local
+  log_level: INFO
+
+llm:
+  provider: openai
+  chat_model: gpt-5.4-mini
+  grader_model: gpt-5.4-nano
+  rewriter_model: gpt-5.4-nano
+  embedding_model: text-embedding-3-large
+  temperature: 0.2
+  request_timeout: 60
+
+retrieval:
+  top_k: 5
+  fetch_k: 12
+  chunk_size: 1000
+  chunk_overlap: 150
+  max_rewrites: 1
+  relevance_threshold: 0.5
+
+storage:
+  chroma_path: data/chroma
+  collection_name: oh_my_neuro
+  distance: cosine
+
+vault:
+  path: ""
+  recursive: true
+  include_extensions: [".pdf", ".docx", ".txt", ".md", ".markdown"]
+  max_file_mb: 50
+  excluded_dirs: [".git", "node_modules", ".obsidian", "__pycache__", ".venv", "venv"]
+
+mcp:
+  enabled: false
+  config_path: configs/mcp_servers.yaml
+  law_server: korean_law
+  law_keywords:
+    - 법령
+    - 판례
+    - 법원
+    - 조항
+    - 법률
+    - 헌법
+    - 민법
+    - 형법
+    - 상법
+    - 소송
+    - 계약
+    - 판결
+    - 약관
+
+ui:
+  title: OH-MY-NEURO
+  description: 로컬 Vault 기반 RAG 문서 검색
+  host: 127.0.0.1
+  port: 7860
+  dark: false

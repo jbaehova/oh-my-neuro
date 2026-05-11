@@ -1,0 +1,8 @@
+servers:
+  korean_law:
+    transport: stdio
+    command: uvx
+    args:
+      - mcp-server-korean-law
+    env: {}
+    enabled: false

@@ -1,0 +1,37 @@
+.env
+.env.*
+!.env.example
+.agents/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+
+# Data
+data/*
+!data/chroma/
+!data/chroma/.gitkeep
+!data/uploads/
+!data/uploads/.gitkeep
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Git worktrees (superpowers development)
+.worktrees/
