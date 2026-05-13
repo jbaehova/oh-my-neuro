@@ -1,13 +1,58 @@
+import { useEffect, useState } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+
+import { AppShell } from "@/components/AppShell";
+import { useTheme } from "@/hooks/useTheme";
+import { Bootstrap, getBootstrap } from "@/lib/api";
+import { ChatPage } from "@/pages/ChatPage";
+import { OnboardingPage } from "@/pages/OnboardingPage";
+import { SettingsPage } from "@/pages/SettingsPage";
+import { VaultPage } from "@/pages/VaultPage";
+
 export function App() {
+  const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
+  const [error, setError] = useState("");
+  const theme = useTheme();
+
+  useEffect(() => {
+    void getBootstrap().then(setBootstrap).catch((exc) => {
+      setError(exc instanceof Error ? exc.message : "서버에 연결할 수 없습니다.");
+    });
+  }, []);
+
+  if (error) {
+    return (
+      <main className="grid min-h-screen place-items-center px-4">
+        <div className="max-w-md rounded-lg border p-5">
+          <h1 className="text-lg font-semibold">연결 오류</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!bootstrap) {
+    return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading</div>;
+  }
+
   return (
-    <main className="grid min-h-screen place-items-center bg-background px-6 text-foreground">
-      <section className="w-full max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-        <p className="text-sm font-medium text-muted-foreground">OH-MY-NEURO</p>
-        <h1 className="mt-2 text-2xl font-semibold">프로젝트 초기 화면</h1>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          팀원별 구현 브랜치가 합쳐지면 Chat, Vault, Settings 화면과 RAG 기능이 이 앱에 연결됩니다.
-        </p>
-      </section>
-    </main>
+    <Routes>
+      <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route element={<AppShell bootstrap={bootstrap} dark={theme.dark} setDark={theme.setDark} />}>
+        <Route path="/" element={<RootRedirect bootstrap={bootstrap} />} />
+        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/vault" element={<VaultPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+      </Route>
+    </Routes>
   );
 }
+
+function RootRedirect({ bootstrap }: { bootstrap: Bootstrap }) {
+  const location = useLocation();
+  if (!bootstrap.onboarding_completed || !bootstrap.vault_path) {
+    return <Navigate to="/onboarding" replace state={{ from: location }} />;
+  }
+  return <Navigate to="/chat" replace />;
+}
+
