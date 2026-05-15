@@ -6,8 +6,8 @@ app:
 llm:
   provider: openai
   chat_model: gpt-5.4-mini
-  grader_model: gpt-5.4-nano
-  rewriter_model: gpt-5.4-nano
+  grader_model: gpt-5.4-mini
+  rewriter_model: gpt-5.4-mini
   embedding_model: text-embedding-3-large
   temperature: 0.2
   request_timeout: 60
