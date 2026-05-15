@@ -6,6 +6,8 @@ from fastapi import APIRouter
 
 from app.api.deps import effective_config
 from app.api.schemas import BootstrapResponse, HealthResponse
+from app.ingestion.pipeline import list_indexed_sources
+from app.vault.state import VaultState
 
 router = APIRouter()
 
@@ -22,12 +24,17 @@ def health() -> HealthResponse:
 @router.get("/bootstrap", response_model=BootstrapResponse)
 def bootstrap() -> BootstrapResponse:
     cfg = effective_config()
+    state = VaultState.load()
+    try:
+        indexed_files = len(list_indexed_sources(config=cfg))
+    except Exception:
+        indexed_files = 0
     return BootstrapResponse(
         title=cfg.ui.title,
         description=cfg.ui.description,
-        onboarding_completed=False,
-        vault_path="",
+        onboarding_completed=state.onboarding_completed,
+        vault_path=state.vault_path,
         api_key_configured=cfg.has_api_key(),
-        indexed_files=0,
-        last_sync_at=None,
+        indexed_files=indexed_files,
+        last_sync_at=state.last_sync_at,
     )
