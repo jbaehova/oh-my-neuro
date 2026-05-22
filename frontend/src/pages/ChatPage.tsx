@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Copy, Loader2, Send, StopCircle } from "lucide-react";
-
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -181,6 +182,7 @@ export function ChatPage() {
 
 function MessageBubble({ message }: { message: RichMessage }) {
   const isUser = message.role === "user";
+
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
       <div
@@ -189,7 +191,41 @@ function MessageBubble({ message }: { message: RichMessage }) {
           isUser ? "bg-primary text-primary-foreground" : "surface",
         )}
       >
-        <div className="whitespace-pre-wrap">{message.content || (!isUser ? "..." : "")}</div>
+        {isUser ? (
+          <div className="whitespace-pre-wrap">{message.content}</div>
+        ) : (
+          <div className="space-y-2">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                h1: ({ children }) => <h1 className="text-xl font-semibold">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-lg font-semibold">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-base font-semibold">{children}</h3>,
+                p: ({ children }) => <p className="leading-7">{children}</p>,
+                ul: ({ children }) => <ul className="list-disc space-y-1 pl-5">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal space-y-1 pl-5">{children}</ol>,
+                li: ({ children }) => <li>{children}</li>,
+                code: ({ children }) => (
+                  <code className="rounded bg-muted px-1 py-0.5 text-xs">{children}</code>
+                ),
+                pre: ({ children }) => (
+                  <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">{children}</pre>
+                ),
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-4 pl-4 text-muted-foreground">{children}</blockquote>
+                ),
+                a: ({ href, children }) => (
+                  <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                    {children}
+                  </a>
+                ),
+              }}
+            >
+              {message.content || "..."}
+            </ReactMarkdown>
+          </div>
+        )}
+
         {!isUser && (
           <div className="mt-3 flex flex-wrap gap-2">
             {typeof message.retrieval_count === "number" && message.retrieval_count > 0 && (
