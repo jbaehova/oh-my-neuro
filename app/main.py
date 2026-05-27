@@ -96,7 +96,11 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 def cmd_vault(args: argparse.Namespace) -> int:
     _ensure_config(args.config)
-    target = Path(args.path).expanduser().resolve()
+    path = args.path.strip()
+    if not path:
+        print("Vault 경로를 입력하세요.", file=sys.stderr)
+        return 2
+    target = Path(path).expanduser().resolve()
     if not target.exists() or not target.is_dir():
         print(f"디렉토리가 존재하지 않습니다: {target}", file=sys.stderr)
         return 2

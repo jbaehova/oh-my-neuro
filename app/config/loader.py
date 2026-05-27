@@ -6,6 +6,7 @@ YAML과 환경 변수를 병합해 Pydantic 모델로 검증된 설정 객체를
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -85,9 +86,10 @@ class VaultSection(BaseModel):
 
     @property
     def path_abs(self) -> Path | None:
-        if not self.path:
+        path = self.path.strip()
+        if not path:
             return None
-        return Path(self.path).expanduser().resolve()
+        return Path(path).expanduser().resolve()
 
 
 class MCPSection(BaseModel):
@@ -95,10 +97,15 @@ class MCPSection(BaseModel):
     config_path: str = "configs/mcp_servers.yaml"
     law_server: str = "korean_law"
     law_keywords: list[str] = Field(default_factory=list)
+    tool_name_prefix: bool = True
 
     @property
     def config_path_abs(self) -> Path:
         return _project_path(self.config_path)
+
+
+def _expand_env(value: str) -> str:
+    return os.path.expandvars(value)
 
 
 class UISection(BaseModel):
@@ -135,26 +142,54 @@ class MCPServerSpec(BaseModel):
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    cwd: str | None = None
+    timeout: float | None = None
+    sse_read_timeout: float | None = None
+    terminate_on_close: bool | None = None
     enabled: bool = True
 
     def to_adapter_spec(self) -> dict[str, Any]:
-        if self.transport == "stdio":
-            return {
-                "command": self.command or "",
-                "args": list(self.args),
+        transport = self.transport.lower().replace("-", "_")
+        if transport == "http":
+            transport = "streamable_http"
+
+        if transport == "stdio":
+            if not self.command:
+                raise ValueError(f"MCP server '{self.name}' requires command for stdio transport")
+            spec: dict[str, Any] = {
+                "command": _expand_env(self.command),
+                "args": [_expand_env(arg) for arg in self.args],
                 "transport": "stdio",
-                "env": dict(self.env),
+                "env": {k: _expand_env(v) for k, v in self.env.items()},
             }
-        if self.transport in ("streamable_http", "http"):
-            return {
-                "url": self.url or "",
-                "transport": "streamable_http",
+            if self.cwd:
+                spec["cwd"] = _expand_env(self.cwd)
+            return spec
+
+        if transport in ("streamable_http", "sse", "websocket"):
+            if not self.url:
+                raise ValueError(f"MCP server '{self.name}' requires url for {transport} transport")
+            spec = {
+                "url": _expand_env(self.url),
+                "transport": transport,
             }
-        if self.transport == "sse":
-            return {
-                "url": self.url or "",
-                "transport": "sse",
-            }
+            if self.headers:
+                spec["headers"] = {k: _expand_env(v) for k, v in self.headers.items()}
+            if self.timeout is not None:
+                spec["timeout"] = (
+                    timedelta(seconds=self.timeout) if transport == "streamable_http" else self.timeout
+                )
+            if self.sse_read_timeout is not None:
+                spec["sse_read_timeout"] = (
+                    timedelta(seconds=self.sse_read_timeout)
+                    if transport == "streamable_http"
+                    else self.sse_read_timeout
+                )
+            if self.terminate_on_close is not None and transport == "streamable_http":
+                spec["terminate_on_close"] = self.terminate_on_close
+            return spec
+
         raise ValueError(f"Unsupported MCP transport: {self.transport}")
 
 

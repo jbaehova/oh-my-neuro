@@ -13,12 +13,16 @@ export function OnboardingPage() {
   const [event, setEvent] = useState<SyncEvent | null>(null);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const vaultPath = path.trim();
 
   async function start() {
+    const nextPath = path.trim();
+    if (!nextPath || running) return;
     setError("");
     setRunning(true);
+    setEvent({ kind: "progress", file: "", stage: "Vault 경로 확인 중", fraction: null });
     try {
-      await setVaultPath(path);
+      await setVaultPath(nextPath);
       for await (const item of streamSync()) {
         setEvent(item);
         if (item.kind === "error") {
@@ -50,7 +54,7 @@ export function OnboardingPage() {
           <label className="text-sm font-medium">Vault path</label>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <Input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/Users/me/Documents/MyVault" />
-            <Button onClick={start} disabled={!path.trim() || running}>
+            <Button onClick={start} disabled={!vaultPath || running}>
               {running ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
               시작
             </Button>
@@ -69,4 +73,3 @@ export function OnboardingPage() {
     </main>
   );
 }
-

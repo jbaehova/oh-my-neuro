@@ -39,7 +39,10 @@ def status() -> VaultStatusResponse:
 
 @router.post("", response_model=VaultStatusResponse)
 def set_vault(payload: VaultPathRequest) -> VaultStatusResponse:
-    target = Path(payload.path).expanduser().resolve()
+    path = payload.path.strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="Vault path를 입력해 주세요.")
+    target = Path(path).expanduser().resolve()
     if not target.exists() or not target.is_dir():
         raise HTTPException(status_code=400, detail=f"디렉토리가 존재하지 않습니다: {target}")
     state = VaultState.load()
@@ -115,4 +118,3 @@ def sync() -> StreamingResponse:
         iter_ndjson(_event_iter()),
         media_type="application/x-ndjson; charset=utf-8",
     )
-

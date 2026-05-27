@@ -132,10 +132,19 @@ class MCPClient:
             except ImportError as e:
                 self._error = f"langchain-mcp-adapters 미설치: {e}"
                 return
-            spec = {name: server.to_adapter_spec() for name, server in enabled.items()}
             try:
-                self._client = MultiServerMCPClient(spec)
+                spec = {name: server.to_adapter_spec() for name, server in enabled.items()}
+            except Exception as e:
+                log.warning("MCP 서버 설정 변환 실패: %s", e)
+                self._error = f"MCP 서버 설정 오류: {e}"
+                return
+            try:
+                self._client = MultiServerMCPClient(
+                    spec,
+                    tool_name_prefix=self._cfg.mcp.tool_name_prefix,
+                )
                 self._tools = _run_async(self._client.get_tools())
+                self._error = None
                 log.info("MCP 도구 로드: %d개", len(self._tools or []))
             except Exception as e:
                 log.warning("MCP 초기화 실패: %s", e)
@@ -147,11 +156,14 @@ class MCPClient:
     def status(self) -> dict[str, Any]:
         self._initialize()
         tools = [getattr(t, "name", "?") for t in (self._tools or [])]
+        mcp_cfg = self._load_mcp_config()
         return {
             "enabled": self._cfg.mcp.enabled,
             "available": self._tools is not None and bool(self._tools),
             "error": self._error,
             "tools": tools,
+            "servers": list(mcp_cfg.servers.keys()),
+            "enabled_servers": list(mcp_cfg.enabled_servers().keys()),
             "server": self._cfg.mcp.law_server,
         }
 
@@ -162,6 +174,7 @@ class MCPClient:
     def _pick_law_tool(self):
         if not self._tools:
             return None
+        law_server = self._cfg.mcp.law_server.lower()
         preferred = [
             "search_law",
             "search_korean_law",
@@ -171,11 +184,21 @@ class MCPClient:
         ]
         named = {getattr(t, "name", ""): t for t in self._tools}
         for name in preferred:
+            prefixed = f"{law_server}_{name}"
+            if prefixed in named:
+                return named[prefixed]
+        for name in preferred:
             if name in named:
                 return named[name]
         for tool in self._tools:
             name = getattr(tool, "name", "").lower()
-            if "law" in name or "법" in name or "statute" in name or "precedent" in name:
+            if (
+                name.startswith(f"{law_server}_")
+                or "law" in name
+                or "법" in name
+                or "statute" in name
+                or "precedent" in name
+            ):
                 return tool
         return self._tools[0] if self._tools else None
 

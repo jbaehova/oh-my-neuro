@@ -5,4 +5,4 @@ servers:
     args:
       - mcp-server-korean-law
     env: {}
-    enabled: false
+    enabled: true

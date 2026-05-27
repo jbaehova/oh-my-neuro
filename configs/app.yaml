@@ -36,6 +36,7 @@ mcp:
   enabled: false
   config_path: configs/mcp_servers.yaml
   law_server: korean_law
+  tool_name_prefix: true
   law_keywords:
     - 법령
     - 판례
