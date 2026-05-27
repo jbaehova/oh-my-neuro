@@ -32,7 +32,14 @@ export function VaultPage() {
     return files.filter((file) => file.source.toLowerCase().includes(q));
   }, [files, query]);
 
+  const hasVaultPath = Boolean(status?.vault_path?.trim());
+  const syncDisabled = syncing || !hasVaultPath;
+
   async function runSync() {
+    if (!hasVaultPath) {
+      setSyncEvent({ kind: "error", text: "Vault 경로를 먼저 설정해주세요." });
+      return;
+    }
     setSyncing(true);
     setSyncEvent({ kind: "progress", file: "", stage: "준비 중", fraction: null });
     try {
@@ -58,7 +65,7 @@ export function VaultPage() {
         title="Vault"
         description="선택한 로컬 디렉토리의 문서를 ChromaDB 인덱스와 동기화합니다."
         action={
-          <Button onClick={runSync} disabled={syncing || !status?.vault_path}>
+          <Button onClick={runSync} disabled={syncDisabled} title={!hasVaultPath ? "Vault 경로를 먼저 설정해주세요." : undefined}>
             <RefreshCw className={syncing ? "size-4 animate-spin" : "size-4"} />
             SYNC
           </Button>
@@ -105,7 +112,11 @@ export function VaultPage() {
           <EmptyState
             title="인덱싱된 파일이 없습니다"
             description="Vault 경로를 설정한 뒤 SYNC를 실행하면 파일 목록이 표시됩니다."
-            action={<Button onClick={runSync} disabled={syncing || !status?.vault_path}>SYNC 실행</Button>}
+            action={
+              <Button onClick={runSync} disabled={syncDisabled} title={!hasVaultPath ? "Vault 경로를 먼저 설정해주세요." : undefined}>
+                SYNC 실행
+              </Button>
+            }
           />
         ) : (
           <div className="overflow-hidden rounded-lg border">

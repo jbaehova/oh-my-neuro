@@ -57,3 +57,21 @@ oh-my-neuro ui
 ```text
 http://127.0.0.1:7860
 ```
+
+## MCP 외부 서버 설정
+
+MCP는 기본적으로 `configs/app.yaml`의 전역 토글이 꺼져 있습니다.
+UI의 Settings 화면에서 MCP를 켜면 `configs/mcp_servers.yaml`에 활성화된 서버가 로드됩니다.
+
+```yaml
+servers:
+  korean_law:
+    transport: stdio
+    command: uvx
+    args:
+      - mcp-server-korean-law
+    env: {}
+    enabled: true
+```
+
+HTTP/SSE 기반 외부 MCP 서버는 `transport`, `url`, `headers`를 같은 파일에 추가해 사용할 수 있습니다.

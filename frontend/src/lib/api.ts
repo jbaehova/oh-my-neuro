@@ -173,9 +173,14 @@ async function* requestStream<T>(path: string, init?: RequestInit): AsyncGenerat
 async function readError(response: Response): Promise<string> {
   try {
     const data = await response.json();
-    return data.detail || data.message || response.statusText;
+    const detail = data.detail || data.message;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail.map((item) => item?.msg || JSON.stringify(item)).join("\n");
+    }
+    if (detail) return JSON.stringify(detail);
+    return response.statusText;
   } catch {
     return response.statusText;
   }
 }
-
