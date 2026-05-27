@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 .agents/
+.docs/
 
 # Python
 __pycache__/
