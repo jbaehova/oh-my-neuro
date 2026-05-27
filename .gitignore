@@ -3,6 +3,7 @@
 !.env.example
 .agents/
 .docs/
+.mock_data
 
 # Python
 __pycache__/
@@ -25,8 +26,10 @@ npm-debug.log*
 # Data
 data/*
 !data/chroma/
+data/chroma/*
 !data/chroma/.gitkeep
 !data/uploads/
+data/uploads/*
 !data/uploads/.gitkeep
 
 # OS / IDE
