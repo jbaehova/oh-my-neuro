@@ -8,6 +8,7 @@ import { ChatPage } from "@/pages/ChatPage";
 import { OnboardingPage } from "@/pages/OnboardingPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { VaultPage } from "@/pages/VaultPage";
+import { WikiPage } from "@/pages/WikiPage";
 
 export function App() {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
@@ -42,6 +43,7 @@ export function App() {
         <Route path="/" element={<RootRedirect bootstrap={bootstrap} />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/vault" element={<VaultPage />} />
+        <Route path="/wiki" element={<WikiPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
     </Routes>
@@ -55,4 +57,3 @@ function RootRedirect({ bootstrap }: { bootstrap: Bootstrap }) {
   }
   return <Navigate to="/chat" replace />;
 }
-

@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 type RichMessage = ChatMessage & {
   citations?: Citation[];
   retrieval_count?: number;
+  raw_count?: number;
+  wiki_count?: number;
   used_mcp?: boolean;
 };
 
@@ -62,6 +64,8 @@ export function ChatPage() {
     let answer = "";
     let citations: Citation[] = [];
     let retrievalCount = 0;
+    let rawCount = 0;
+    let wikiCount = 0;
     let usedMcp = false;
     try {
       for await (const chunk of streamChat(question, history)) {
@@ -69,6 +73,8 @@ export function ChatPage() {
         if (chunk.kind === "meta") {
           citations = chunk.citations || [];
           retrievalCount = chunk.retrieval_count || 0;
+          rawCount = chunk.raw_count || 0;
+          wikiCount = chunk.wiki_count || 0;
           usedMcp = Boolean(chunk.used_mcp);
         } else if (chunk.kind === "token") {
           answer += chunk.text || "";
@@ -89,13 +95,15 @@ export function ChatPage() {
     } finally {
       const finalMessages = replaceLastAssistant(
         nextMessages.map((m) => ({ ...m })),
-        { content: answer, citations, retrieval_count: retrievalCount, used_mcp: usedMcp },
+        { content: answer, citations, retrieval_count: retrievalCount, raw_count: rawCount, wiki_count: wikiCount, used_mcp: usedMcp },
       );
       setMessages((current) => {
         const merged = replaceLastAssistant(current, {
           content: answer,
           citations,
           retrieval_count: retrievalCount,
+          raw_count: rawCount,
+          wiki_count: wikiCount,
           used_mcp: usedMcp,
         });
         sessions.save(sessionId, merged);
@@ -231,10 +239,17 @@ function MessageBubble({ message }: { message: RichMessage }) {
             {typeof message.retrieval_count === "number" && message.retrieval_count > 0 && (
               <Badge variant="secondary">{message.retrieval_count} chunks</Badge>
             )}
+            {typeof message.wiki_count === "number" && message.wiki_count > 0 && (
+              <Badge variant="outline">{message.wiki_count} wiki</Badge>
+            )}
+            {typeof message.raw_count === "number" && message.raw_count > 0 && (
+              <Badge variant="outline">{message.raw_count} raw</Badge>
+            )}
             {message.used_mcp && <Badge variant="warning">MCP</Badge>}
             {message.citations?.map((citation, index) => (
-              <Badge key={`${citation.source}-${index}`} variant="outline" className="max-w-full truncate">
-                {index + 1}. {citation.source}
+              <Badge key={`${citation.source}-${index}`} variant={citation.kind === "wiki" ? "secondary" : "outline"} className="max-w-full truncate">
+                {index + 1}. {citation.kind === "wiki" ? "Wiki: " : ""}
+                {citation.source}
                 {citation.page ? ` p.${citation.page}` : ""}
               </Badge>
             ))}

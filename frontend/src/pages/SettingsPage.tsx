@@ -12,6 +12,7 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const retrieval = settings?.retrieval || {};
+  const wiki = settings?.wiki || {};
   const mcp = settings?.mcp || {};
 
   useEffect(() => {
@@ -29,6 +30,13 @@ export function SettingsPage() {
   async function updateMcp(enabled: boolean) {
     setSaving(true);
     const next = await patchSettings({ mcp: { enabled } });
+    setSettings(next);
+    setSaving(false);
+  }
+
+  async function updateWiki(key: string, value: boolean) {
+    setSaving(true);
+    const next = await patchSettings({ wiki: { [key]: value } });
     setSettings(next);
     setSaving(false);
   }
@@ -64,6 +72,27 @@ export function SettingsPage() {
         </section>
 
         <aside className="space-y-6">
+          <section className="surface rounded-lg p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold">Wiki</h2>
+                <p className="mt-1 text-xs text-muted-foreground">Vault 안의 Markdown 지식 레이어입니다.</p>
+              </div>
+              <Switch checked={Boolean(wiki.enabled)} onCheckedChange={(checked) => updateWiki("enabled", checked)} />
+            </div>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-medium">Sync 때 갱신</div>
+                <div className="mt-1 text-xs text-muted-foreground">Vault SYNC 후 Wiki를 자동 재생성합니다.</div>
+              </div>
+              <Switch checked={Boolean(wiki.update_on_sync)} onCheckedChange={(checked) => updateWiki("update_on_sync", checked)} />
+            </div>
+            <div className="mt-4 space-y-2 text-xs text-muted-foreground">
+              <div>Directory: {String(wiki.directory || "-")}</div>
+              <div>Collection: {String(wiki.collection_name || "-")}</div>
+            </div>
+          </section>
+
           <section className="surface rounded-lg p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -123,4 +152,3 @@ function NumberSetting({
     </label>
   );
 }
-

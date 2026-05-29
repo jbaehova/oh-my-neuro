@@ -3,7 +3,7 @@ export type Citation = {
   location?: string;
   page?: number | null;
   doc_type?: string | null;
-  kind?: "document" | "mcp";
+  kind?: "document" | "mcp" | "wiki";
   snippet?: string | null;
 };
 
@@ -18,6 +18,8 @@ export type ChatResponse = {
   used_mcp: boolean;
   rewritten_question?: string | null;
   retrieval_count: number;
+  wiki_count?: number;
+  raw_count?: number;
 };
 
 export type ChatChunk = {
@@ -27,6 +29,8 @@ export type ChatChunk = {
   used_mcp?: boolean;
   rewritten_question?: string | null;
   retrieval_count?: number;
+  wiki_count?: number;
+  raw_count?: number;
 };
 
 export type Bootstrap = {
@@ -37,6 +41,7 @@ export type Bootstrap = {
   api_key_configured: boolean;
   indexed_files: number;
   last_sync_at?: string | null;
+  wiki?: WikiStatus;
 };
 
 export type VaultStatus = {
@@ -46,6 +51,7 @@ export type VaultStatus = {
   sync_history: SyncHistoryEntry[];
   indexed_files: number;
   api_key_configured: boolean;
+  wiki?: WikiStatus;
 };
 
 export type SyncHistoryEntry = {
@@ -74,10 +80,53 @@ export type Settings = {
   llm: Record<string, unknown>;
   retrieval: Record<string, number | string | boolean>;
   storage: Record<string, unknown>;
+  wiki: Record<string, number | string | boolean>;
   vault: Record<string, unknown>;
   mcp: Record<string, unknown>;
   ui: Record<string, unknown>;
   api_key_configured: boolean;
+};
+
+export type WikiStatus = {
+  enabled: boolean;
+  configured: boolean;
+  path: string;
+  page_count: number;
+  indexed_chunks: number;
+  source_count: number;
+  last_built_at?: string | null;
+  error?: string;
+};
+
+export type WikiPageSummary = {
+  id: string;
+  path: string;
+  title: string;
+  section: string;
+  size: number;
+  updated_at: string;
+  excerpt: string;
+};
+
+export type WikiPageContent = WikiPageSummary & {
+  content: string;
+};
+
+export type WikiBuildResult = {
+  pages_written: number;
+  indexed_chunks: number;
+  sources_processed: number;
+  sources_skipped: number;
+  duration_s: number;
+  error?: string;
+};
+
+export type WikiLintIssue = {
+  severity: "info" | "warning" | "error";
+  code: string;
+  message: string;
+  page?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export async function getBootstrap(): Promise<Bootstrap> {
@@ -116,6 +165,27 @@ export async function clearIndex(): Promise<{ deleted_chunks: number }> {
     method: "POST",
     body: JSON.stringify({ force: true }),
   });
+}
+
+export async function getWikiStatus(): Promise<WikiStatus> {
+  return request("/api/wiki/status");
+}
+
+export async function getWikiPages(q = ""): Promise<WikiPageSummary[]> {
+  const suffix = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+  return request(`/api/wiki/pages${suffix}`);
+}
+
+export async function getWikiPage(id: string): Promise<WikiPageContent> {
+  return request(`/api/wiki/page?id=${encodeURIComponent(id)}`);
+}
+
+export async function rebuildWiki(): Promise<WikiBuildResult> {
+  return request("/api/wiki/rebuild", { method: "POST" });
+}
+
+export async function getWikiLint(): Promise<WikiLintIssue[]> {
+  return request("/api/wiki/lint");
 }
 
 export async function* streamChat(question: string, history: ChatMessage[]): AsyncGenerator<ChatChunk> {

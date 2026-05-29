@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Bot, Database, FolderOpen, MessageSquare, Moon, Plus, Settings, Sun } from "lucide-react";
+import { BookOpen, Bot, Database, FolderOpen, MessageSquare, Moon, Plus, Settings, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,7 @@ type AppShellProps = {
 const nav = [
   { to: "/chat", label: "Chat", icon: MessageSquare },
   { to: "/vault", label: "Vault", icon: FolderOpen },
+  { to: "/wiki", label: "Wiki", icon: BookOpen },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -92,6 +93,7 @@ export function AppShell({ bootstrap, dark, setDark }: AppShellProps) {
                 {bootstrap?.api_key_configured ? "API key OK" : "API key 없음"}
               </Badge>
               <Badge variant="outline">{bootstrap?.indexed_files ?? 0} files</Badge>
+              {bootstrap?.wiki?.page_count ? <Badge variant="outline">{bootstrap.wiki.page_count} wiki</Badge> : null}
             </div>
           </div>
           <Button variant="ghost" className="w-full justify-start" onClick={() => setDark(!dark)}>
@@ -127,4 +129,3 @@ export function AppShell({ bootstrap, dark, setDark }: AppShellProps) {
     </div>
   );
 }
-
