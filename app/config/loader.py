@@ -73,6 +73,22 @@ class StorageSection(BaseModel):
         return _project_path(self.chroma_path)
 
 
+class WikiSection(BaseModel):
+    enabled: bool = True
+    update_on_sync: bool = True
+    directory: str = "_omn_wiki"
+    collection_name: str = "oh_my_neuro_wiki"
+    max_source_chars: int = 12000
+
+    @field_validator("directory")
+    @classmethod
+    def _directory_name(cls, v: str) -> str:
+        value = v.strip().strip("/\\")
+        if not value:
+            raise ValueError("wiki.directory must not be blank")
+        return value
+
+
 class VaultSection(BaseModel):
     path: str = ""
     recursive: bool = True
@@ -81,7 +97,15 @@ class VaultSection(BaseModel):
     )
     max_file_mb: int = 50
     excluded_dirs: list[str] = Field(
-        default_factory=lambda: [".git", "node_modules", ".obsidian", "__pycache__", ".venv", "venv"]
+        default_factory=lambda: [
+            ".git",
+            "node_modules",
+            ".obsidian",
+            "__pycache__",
+            ".venv",
+            "venv",
+            "_omn_wiki",
+        ]
     )
 
     @property
@@ -121,6 +145,7 @@ class AppConfig(BaseModel):
     llm: LLMSection = Field(default_factory=LLMSection)
     retrieval: RetrievalSection = Field(default_factory=RetrievalSection)
     storage: StorageSection = Field(default_factory=StorageSection)
+    wiki: WikiSection = Field(default_factory=WikiSection)
     vault: VaultSection = Field(default_factory=VaultSection)
     mcp: MCPSection = Field(default_factory=MCPSection)
     ui: UISection = Field(default_factory=UISection)

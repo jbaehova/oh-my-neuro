@@ -1,10 +1,15 @@
 from datetime import timedelta
 
-from app.config.loader import MCPServerSpec, VaultSection
+from app.config.loader import MCPServerSpec, VaultSection, WikiSection
 
 
 def test_blank_vault_path_is_unset() -> None:
     assert VaultSection(path="   ").path_abs is None
+
+
+def test_wiki_directory_is_normalized() -> None:
+    assert WikiSection(directory="/_omn_wiki/").directory == "_omn_wiki"
+    assert "_omn_wiki" in VaultSection().excluded_dirs
 
 
 def test_stdio_mcp_spec_expands_environment(monkeypatch) -> None:

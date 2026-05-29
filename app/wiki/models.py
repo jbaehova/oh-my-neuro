@@ -1,0 +1,65 @@
+"""Models for the generated Vault wiki."""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+
+class WikiSourceState(BaseModel):
+    content_hash: str
+    source_page: str
+    title: str
+    updated_at: str
+    concepts: dict[str, str] = Field(default_factory=dict)
+    open_questions: list[str] = Field(default_factory=list)
+    excerpt: str = ""
+
+
+class WikiState(BaseModel):
+    version: int = 1
+    last_built_at: str | None = None
+    sources: dict[str, WikiSourceState] = Field(default_factory=dict)
+
+
+class WikiStatus(BaseModel):
+    enabled: bool
+    configured: bool
+    path: str = ""
+    page_count: int = 0
+    indexed_chunks: int = 0
+    source_count: int = 0
+    last_built_at: str | None = None
+    error: str = ""
+
+
+class WikiPageSummary(BaseModel):
+    id: str
+    path: str
+    title: str
+    section: str
+    size: int = 0
+    updated_at: str = ""
+    excerpt: str = ""
+
+
+class WikiPageContent(WikiPageSummary):
+    content: str
+
+
+class WikiBuildResult(BaseModel):
+    pages_written: int = 0
+    indexed_chunks: int = 0
+    sources_processed: int = 0
+    sources_skipped: int = 0
+    duration_s: float = 0.0
+    error: str = ""
+
+
+class WikiLintIssue(BaseModel):
+    severity: Literal["info", "warning", "error"] = "info"
+    code: str
+    message: str
+    page: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)

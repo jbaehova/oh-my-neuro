@@ -153,6 +153,25 @@ class OpenAILLM:
         return _content_to_text(resp.content).strip() or prompts.EMPTY_ANSWER
 
     @_retry
+    def wiki_source_summary(self, *, source: str, doc_type: str, title: str, text: str) -> str:
+        from app.wiki import prompts as wiki_prompts
+
+        content = [
+            ("system", wiki_prompts.WIKI_SOURCE_SYSTEM),
+            (
+                "user",
+                wiki_prompts.WIKI_SOURCE_USER.format(
+                    source=source,
+                    doc_type=doc_type,
+                    title=title,
+                    text=text,
+                ),
+            ),
+        ]
+        resp = self._chat.invoke(content)
+        return _content_to_text(resp.content).strip()
+
+    @_retry
     def classify_intent(
         self, question: str, history: list[ChatMessage] | None = None
     ) -> str:
