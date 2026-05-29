@@ -35,6 +35,7 @@ class GraphDeps:
     retriever: Retriever
     llm: LLMClient
     mcp: MCPBridge | None = None
+    wiki_retriever: Retriever | None = None
     config: AppConfig | None = None
 
 
@@ -43,7 +44,9 @@ class RAGState(TypedDict, total=False):
     rewritten_question: str | None
     chat_history: list[ChatMessage]
     retrieved_docs: list[RetrievedChunk]
+    wiki_docs: list[RetrievedChunk]
     graded_docs: list[RetrievedChunk]
+    graded_wiki_docs: list[RetrievedChunk]
     mcp_results: list[MCPResult]
     used_mcp: bool
     rewrites: int
@@ -61,10 +64,19 @@ def _is_law_question(question: str, cfg: AppConfig) -> bool:
     return any(kw.lower() in text for kw in cfg.mcp.law_keywords)
 
 
-def _render_context(docs: list[RetrievedChunk], mcp_results: list[MCPResult]) -> tuple[str, list[Citation]]:
+def _render_context(
+    wiki_docs: list[RetrievedChunk],
+    docs: list[RetrievedChunk],
+    mcp_results: list[MCPResult],
+) -> tuple[str, list[Citation]]:
     lines: list[str] = []
     citations: list[Citation] = []
     idx = 1
+    for doc in wiki_docs:
+        cit = doc.as_citation()
+        citations.append(cit)
+        lines.append(f"[{idx}] 출처: {cit.render()}\n{doc.content}")
+        idx += 1
     for doc in docs:
         cit = doc.as_citation()
         citations.append(cit)
@@ -104,11 +116,19 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
     def retrieve_node(state: RAGState) -> RAGState:
         q = state.get("rewritten_question") or state["question"]
         docs = deps.retriever.search(q, top_k=top_k, fetch_k=fetch_k)
-        log.info("retrieve: %d candidates for %r", len(docs), q[:60])
-        return {"retrieved_docs": docs}
+        wiki_docs: list[RetrievedChunk] = []
+        if deps.wiki_retriever is not None:
+            try:
+                wiki_docs = deps.wiki_retriever.search(q, top_k=top_k, fetch_k=fetch_k)
+            except Exception as e:
+                log.warning("wiki retrieve 실패: %s", e)
+                wiki_docs = []
+        log.info("retrieve: %d raw, %d wiki candidates for %r", len(docs), len(wiki_docs), q[:60])
+        return {"retrieved_docs": docs, "wiki_docs": wiki_docs}
 
     def grade_node(state: RAGState) -> RAGState:
         docs = state.get("retrieved_docs") or []
+        wiki_docs = state.get("wiki_docs") or []
         question = state.get("rewritten_question") or state["question"]
         graded: list[RetrievedChunk] = []
         for doc in docs:
@@ -119,13 +139,23 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
                 ok = doc.score >= threshold
             if ok:
                 graded.append(doc)
-        log.info("grade: %d / %d kept", len(graded), len(docs))
-        return {"graded_docs": graded}
+        graded_wiki: list[RetrievedChunk] = []
+        for doc in wiki_docs:
+            try:
+                ok = deps.llm.grade(question, doc.content)
+            except Exception as e:
+                log.warning("wiki grader 실패, score로 대체: %s", e)
+                ok = doc.score >= threshold
+            if ok:
+                graded_wiki.append(doc)
+        log.info("grade: %d / %d raw, %d / %d wiki kept", len(graded), len(docs), len(graded_wiki), len(wiki_docs))
+        return {"graded_docs": graded, "graded_wiki_docs": graded_wiki}
 
     def should_rewrite(state: RAGState) -> str:
         graded = state.get("graded_docs") or []
         rewrites = int(state.get("rewrites", 0))
-        if graded:
+        wiki = state.get("graded_wiki_docs") or []
+        if graded or wiki:
             return "route"
         if rewrites >= max_rewrites:
             return "route"
@@ -163,10 +193,11 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
 
     def prepare_context_node(state: RAGState) -> RAGState:
         docs = state.get("graded_docs") or []
+        wiki_docs = state.get("graded_wiki_docs") or []
         mcp_results = state.get("mcp_results") or []
-        if not docs and not mcp_results:
+        if not docs and not wiki_docs and not mcp_results:
             return {"context_block": "", "citations": []}
-        context, citations = _render_context(docs, mcp_results)
+        context, citations = _render_context(wiki_docs, docs, mcp_results)
         return {"context_block": context, "citations": citations}
 
     def generate_node(state: RAGState) -> RAGState:

@@ -8,6 +8,7 @@ from app.api.deps import effective_config
 from app.api.schemas import BootstrapResponse, HealthResponse
 from app.ingestion.pipeline import list_indexed_sources
 from app.vault.state import VaultState
+from app.wiki.service import WikiService
 
 router = APIRouter()
 
@@ -37,4 +38,5 @@ def bootstrap() -> BootstrapResponse:
         api_key_configured=cfg.has_api_key(),
         indexed_files=indexed_files,
         last_sync_at=state.last_sync_at,
+        wiki=WikiService(cfg).status().model_dump(mode="json"),
     )

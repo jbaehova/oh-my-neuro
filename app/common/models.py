@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-SourceKind = Literal["document", "mcp"]
+SourceKind = Literal["document", "mcp", "wiki"]
 
 
 class Citation(BaseModel):
@@ -26,7 +26,8 @@ class Citation(BaseModel):
             parts.append(f"p.{self.page}")
         elif self.location:
             parts.append(self.location)
-        label = "문서" if self.kind == "document" else "외부"
+        labels = {"document": "문서", "mcp": "외부", "wiki": "위키"}
+        label = labels.get(self.kind, "문서")
         return f"[{label}] {' · '.join(parts)}"
 
 
@@ -85,12 +86,15 @@ class RetrievedChunk(BaseModel):
         return str(self.metadata.get("doc_type", ""))
 
     def as_citation(self) -> Citation:
+        kind = str(self.metadata.get("kind") or "document")
+        if kind not in ("document", "mcp", "wiki"):
+            kind = "document"
         return Citation(
             source=self.source,
             location=self.location,
             page=self.page,
             doc_type=self.doc_type,
-            kind="document",
+            kind=kind,  # type: ignore[arg-type]
             snippet=(self.content[:180] + "…") if len(self.content) > 180 else self.content,
         )
 
@@ -131,6 +135,8 @@ class ChatResponse(BaseModel):
     used_mcp: bool = False
     rewritten_question: str | None = None
     retrieval_count: int = 0
+    wiki_count: int = 0
+    raw_count: int = 0
     extras: dict[str, Any] = Field(default_factory=dict)
 
     def render_with_sources(self) -> str:
@@ -158,6 +164,8 @@ class ChatResponseChunk(BaseModel):
     used_mcp: bool = False
     rewritten_question: str | None = None
     retrieval_count: int = 0
+    wiki_count: int = 0
+    raw_count: int = 0
 
 
 class IndexingDocumentResult(BaseModel):
@@ -201,9 +209,17 @@ class SyncResult(BaseModel):
     total_chunks: int = 0
     skipped: list[SkippedFile] = Field(default_factory=list)
     duration_s: float = 0.0
+    wiki_pages: int = 0
+    wiki_sources: int = 0
+    wiki_error: str = ""
 
     def summary(self) -> str:
-        return (
+        base = (
             f"추가 {self.added} · 수정 {self.updated} · 삭제 {self.deleted} · "
             f"건너뜀 {len(self.skipped)} · {self.duration_s:.1f}초"
         )
+        if self.wiki_error:
+            return f"{base} · Wiki 오류"
+        if self.wiki_pages:
+            return f"{base} · Wiki {self.wiki_pages} pages"
+        return base

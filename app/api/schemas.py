@@ -24,6 +24,7 @@ class BootstrapResponse(BaseModel):
     api_key_configured: bool
     indexed_files: int
     last_sync_at: str | None = None
+    wiki: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatRequest(BaseModel):
@@ -37,6 +38,8 @@ class ChatResponseDTO(BaseModel):
     used_mcp: bool = False
     rewritten_question: str | None = None
     retrieval_count: int = 0
+    wiki_count: int = 0
+    raw_count: int = 0
 
 
 class VaultPathRequest(BaseModel):
@@ -50,6 +53,7 @@ class VaultStatusResponse(BaseModel):
     sync_history: list[SyncHistoryEntry] = Field(default_factory=list)
     indexed_files: int = 0
     api_key_configured: bool = False
+    wiki: dict[str, Any] = Field(default_factory=dict)
 
 
 class IndexedFile(BaseModel):
@@ -74,6 +78,7 @@ class SettingsResponse(BaseModel):
     llm: dict[str, Any]
     retrieval: dict[str, Any]
     storage: dict[str, Any]
+    wiki: dict[str, Any]
     vault: dict[str, Any]
     mcp: dict[str, Any]
     ui: dict[str, Any]
@@ -82,6 +87,7 @@ class SettingsResponse(BaseModel):
 
 class SettingsPatch(BaseModel):
     retrieval: dict[str, Any] | None = None
+    wiki: dict[str, Any] | None = None
     mcp: dict[str, Any] | None = None
     ui: dict[str, Any] | None = None
 

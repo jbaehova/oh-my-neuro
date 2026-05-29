@@ -15,6 +15,7 @@ from app.ingestion.pipeline import (
 )
 from app.rag.service import get_service
 from app.vault.state import VaultState
+from app.wiki.service import WikiService
 
 log = get_logger(__name__)
 
@@ -25,6 +26,10 @@ def _ensure_config(path: str | None):
         cfg = load_config(path)
     else:
         cfg = get_config()
+    state = VaultState.load()
+    if state.vault_path:
+        cfg = cfg.model_copy(deep=True)
+        cfg.vault.path = state.vault_path
     setup_logging(cfg.app.log_level)
     cfg.ensure_dirs()
     if not cfg.has_api_key():
@@ -183,6 +188,46 @@ def cmd_clear(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_wiki_status(args: argparse.Namespace) -> int:
+    cfg = _ensure_config(args.config)
+    status = WikiService(cfg).status()
+    print(f"Wiki 활성화     : {status.enabled}")
+    print(f"Wiki 경로       : {status.path or '(미설정)'}")
+    print(f"Wiki 페이지     : {status.page_count}")
+    print(f"Wiki 인덱스     : {status.indexed_chunks} chunks")
+    print(f"마지막 빌드     : {status.last_built_at or '(없음)'}")
+    if status.error:
+        print(f"상태            : {status.error}")
+    return 0
+
+
+def cmd_wiki_rebuild(args: argparse.Namespace) -> int:
+    cfg = _ensure_config(args.config)
+
+    def _progress(name: str, stage: str, frac: float | None = None) -> None:
+        pct = f"{int(frac * 100):3d}%" if isinstance(frac, float) else "  ?%"
+        print(f"[{pct}] {name or 'wiki'} — {stage}")
+
+    result = WikiService(cfg).rebuild(progress=_progress)
+    if result.error:
+        print(f"Wiki 오류: {result.error}", file=sys.stderr)
+        return 2
+    print(
+        f"Wiki 갱신 완료: pages={result.pages_written}, sources={result.sources_processed}, "
+        f"indexed_chunks={result.indexed_chunks}, {result.duration_s:.1f}초"
+    )
+    return 0
+
+
+def cmd_wiki_lint(args: argparse.Namespace) -> int:
+    cfg = _ensure_config(args.config)
+    issues = WikiService(cfg).lint()
+    for issue in issues:
+        page = f" ({issue.page})" if issue.page else ""
+        print(f"[{issue.severity}] {issue.code}{page}: {issue.message}")
+    return 1 if any(issue.severity == "error" for issue in issues) else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="oh-my-neuro",
@@ -218,6 +263,19 @@ def build_parser() -> argparse.ArgumentParser:
     clr = sub.add_parser("clear", help="인덱스 초기화")
     clr.add_argument("--force", action="store_true", help="확인 없이 삭제")
     clr.set_defaults(func=cmd_clear)
+
+    wikip = sub.add_parser("wiki", help="생성된 Vault Wiki 관리")
+    wiki_sub = wikip.add_subparsers(dest="wiki_command")
+    wikip.set_defaults(func=cmd_wiki_status)
+
+    wiki_status = wiki_sub.add_parser("status", help="Wiki 상태 출력")
+    wiki_status.set_defaults(func=cmd_wiki_status)
+
+    wiki_rebuild = wiki_sub.add_parser("rebuild", help="Wiki 재생성 및 인덱싱")
+    wiki_rebuild.set_defaults(func=cmd_wiki_rebuild)
+
+    wiki_lint = wiki_sub.add_parser("lint", help="Wiki 점검")
+    wiki_lint.set_defaults(func=cmd_wiki_lint)
 
     return parser
 

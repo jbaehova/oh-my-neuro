@@ -25,6 +25,7 @@ def get_settings() -> SettingsResponse:
         llm=cfg.llm.model_dump(mode="json"),
         retrieval=cfg.retrieval.model_dump(mode="json"),
         storage=cfg.storage.model_dump(mode="json"),
+        wiki=cfg.wiki.model_dump(mode="json"),
         vault=cfg.vault.model_dump(mode="json"),
         mcp=cfg.mcp.model_dump(mode="json"),
         ui=cfg.ui.model_dump(mode="json"),
@@ -37,6 +38,8 @@ def patch_settings(payload: SettingsPatch) -> SettingsResponse:
     cfg = get_config()
     if payload.retrieval:
         _apply_known(cfg.retrieval, payload.retrieval)
+    if payload.wiki:
+        _apply_known(cfg.wiki, payload.wiki)
     if payload.mcp:
         _apply_known(cfg.mcp, payload.mcp)
         reset_mcp_client()

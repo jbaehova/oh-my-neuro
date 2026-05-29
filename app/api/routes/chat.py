@@ -24,6 +24,8 @@ def ask(payload: ChatRequest) -> ChatResponseDTO:
         used_mcp=response.used_mcp,
         rewritten_question=response.rewritten_question,
         retrieval_count=response.retrieval_count,
+        wiki_count=response.wiki_count,
+        raw_count=response.raw_count,
     )
 
 
@@ -40,4 +42,3 @@ def ask_stream(payload: ChatRequest) -> StreamingResponse:
         iter_ndjson(_events()),
         media_type="application/x-ndjson; charset=utf-8",
     )
-

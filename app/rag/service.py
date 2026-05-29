@@ -30,6 +30,7 @@ class RAGService:
         self._cfg = cfg or get_config()
         self._store = store
         self._mcp = mcp
+        self._wiki_store = None
         self._llm: OpenAILLM | None = None
         self._graph = None  # terminal="generate"
         self._graph_ctx = None  # terminal="prepare_context"
@@ -53,11 +54,24 @@ class RAGService:
             self._mcp = get_mcp_client(self._cfg)
         return self._mcp
 
+    def _ensure_wiki_store(self):
+        if not self._cfg.wiki.enabled:
+            return None
+        if self._wiki_store is None:
+            from app.wiki.store import wiki_root, wiki_vector_store
+
+            root = wiki_root(self._cfg)
+            if root is None or not root.exists():
+                return None
+            self._wiki_store = wiki_vector_store(self._cfg)
+        return self._wiki_store
+
     def _build_deps(self) -> GraphDeps:
         store = self._ensure_store()
         llm = self._ensure_llm()
         mcp = self._ensure_mcp() if self._cfg.mcp.enabled else None
-        return GraphDeps(retriever=store, llm=llm, mcp=mcp, config=self._cfg)
+        wiki_store = self._ensure_wiki_store()
+        return GraphDeps(retriever=store, llm=llm, mcp=mcp, wiki_retriever=wiki_store, config=self._cfg)
 
     def _ensure_graph(self):
         if self._graph is not None:
@@ -141,12 +155,15 @@ class RAGService:
         answer = result.get("answer") or ""
         citations: list[Citation] = list(result.get("citations") or [])
         graded = result.get("graded_docs") or []
+        wiki = result.get("graded_wiki_docs") or []
         return ChatResponse(
             answer=answer,
             citations=citations,
             used_mcp=bool(result.get("used_mcp")),
             rewritten_question=result.get("rewritten_question"),
-            retrieval_count=len(graded),
+            retrieval_count=len(graded) + len(wiki),
+            raw_count=len(graded),
+            wiki_count=len(wiki),
         )
 
     def ask_stream(
@@ -247,6 +264,9 @@ class RAGService:
         used_mcp = bool(prepared.get("used_mcp"))
         rewritten = prepared.get("rewritten_question")
         retrieval_count = len(prepared.get("graded_docs") or [])
+        wiki_count = len(prepared.get("graded_wiki_docs") or [])
+        raw_count = retrieval_count
+        retrieval_count += wiki_count
         context_block = prepared.get("context_block") or ""
 
         yield ChatResponseChunk(
@@ -255,6 +275,8 @@ class RAGService:
             used_mcp=used_mcp,
             rewritten_question=rewritten,
             retrieval_count=retrieval_count,
+            raw_count=raw_count,
+            wiki_count=wiki_count,
         )
 
         if not context_block:
@@ -280,7 +302,9 @@ def _initial_state(question: str, history: Any) -> dict:
         "rewritten_question": None,
         "chat_history": _coerce_history(history),
         "retrieved_docs": [],
+        "wiki_docs": [],
         "graded_docs": [],
+        "graded_wiki_docs": [],
         "mcp_results": [],
         "used_mcp": False,
         "rewrites": 0,

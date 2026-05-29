@@ -15,6 +15,7 @@ from app.api.deps import effective_config, iter_ndjson
 from app.api.schemas import IndexedFilesResponse, VaultPathRequest, VaultStatusResponse
 from app.ingestion.pipeline import index_vault_delta, list_indexed_sources
 from app.vault.state import VaultState
+from app.wiki.service import WikiService
 
 router = APIRouter(prefix="/vault", tags=["vault"])
 
@@ -34,6 +35,7 @@ def status() -> VaultStatusResponse:
         sync_history=state.sync_history,
         indexed_files=indexed_files,
         api_key_configured=cfg.has_api_key(),
+        wiki=WikiService(cfg).status().model_dump(mode="json"),
     )
 
 

@@ -143,6 +143,25 @@ def index_vault_delta(
     if own_store:
         store.close()
 
+    wiki_pages = 0
+    wiki_sources = 0
+    wiki_error = ""
+    if cfg.wiki.enabled and cfg.wiki.update_on_sync:
+        if not cfg.has_api_key():
+            wiki_error = "OPENAI_API_KEY is required to build the wiki."
+        else:
+            try:
+                from app.wiki.service import WikiService
+
+                _notify(progress, "", "위키 갱신 중", None)
+                wiki_result = WikiService(cfg).rebuild(progress=progress)
+                wiki_pages = wiki_result.pages_written
+                wiki_sources = wiki_result.sources_processed
+                wiki_error = wiki_result.error
+            except Exception as e:
+                log.warning("Wiki 갱신 실패: %s", e)
+                wiki_error = str(e)
+
     return SyncResult(
         added=added,
         updated=updated,
@@ -150,6 +169,9 @@ def index_vault_delta(
         total_chunks=total_chunks,
         skipped=skipped,
         duration_s=time.monotonic() - start,
+        wiki_pages=wiki_pages,
+        wiki_sources=wiki_sources,
+        wiki_error=wiki_error,
     )
 
 

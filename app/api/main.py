@@ -19,7 +19,7 @@ def create_app(cfg: AppConfig | None = None):
     from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
 
-    from app.api.routes import chat, health, settings, vault
+    from app.api.routes import chat, health, settings, vault, wiki
 
     cfg = cfg or get_config()
     app = FastAPI(title=cfg.ui.title, version="0.4.0")
@@ -35,6 +35,7 @@ def create_app(cfg: AppConfig | None = None):
     app.include_router(health.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
     app.include_router(vault.router, prefix="/api")
+    app.include_router(wiki.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")
 
     assets_dir = FRONTEND_DIST / "assets"
