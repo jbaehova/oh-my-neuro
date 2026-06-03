@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import re
 import threading
 from collections.abc import Iterable, Iterator
 from typing import Any
@@ -16,6 +17,32 @@ from app.rag.llm import OpenAILLM
 from app.storage.chroma_store import ChromaStore
 
 log = get_logger(__name__)
+
+
+_DIRECT_CHAT_PHRASES = frozenset(
+    {
+        "안녕",
+        "안녕하세요",
+        "ㅎㅇ",
+        "하이",
+        "hi",
+        "hello",
+        "hey",
+        "뭐해",
+        "고마워",
+        "고맙습니다",
+        "감사",
+        "감사합니다",
+        "thanks",
+        "thankyou",
+        "help",
+        "도움말",
+        "사용법",
+        "너는뭐야",
+        "뭐할수있어",
+        "무엇을할수있어",
+    }
+)
 
 
 class RAGService:
@@ -108,6 +135,19 @@ class RAGService:
 
         coerced_history = _coerce_history(history)
 
+        try:
+            llm = self._ensure_llm()
+        except Exception as e:
+            log.exception("LLM 초기화 실패")
+            return ChatResponse(answer=f"LLM 초기화에 실패했습니다: {e}")
+        if _should_answer_directly(q):
+            try:
+                answer = llm.chat(q, coerced_history)
+            except Exception as e:
+                log.exception("일반 대화 응답 실패")
+                return ChatResponse(answer=f"응답 생성 중 오류가 발생했습니다: {e}")
+            return ChatResponse(answer=answer or "...", citations=[], retrieval_count=0)
+
         store = self._ensure_store()
         if store.count() == 0:
             return ChatResponse(
@@ -116,28 +156,13 @@ class RAGService:
                 )
             )
 
-        # Intent 분류 — 일반 대화/인사면 RAG 그래프 우회
-        try:
-            llm = self._ensure_llm()
-        except Exception as e:
-            log.exception("LLM 초기화 실패")
-            return ChatResponse(answer=f"LLM 초기화에 실패했습니다: {e}")
-        intent = _classify_intent(llm, q, coerced_history)
-        if intent == "chat":
-            try:
-                answer = llm.chat(q, coerced_history)
-            except Exception as e:
-                log.exception("일반 대화 응답 실패")
-                return ChatResponse(answer=f"응답 생성 중 오류가 발생했습니다: {e}")
-            return ChatResponse(answer=answer or "...", citations=[], retrieval_count=0)
-
         try:
             graph = self._ensure_graph()
         except Exception as e:
             log.exception("RAG 그래프 초기화 실패")
             return ChatResponse(answer=f"시스템 초기화에 실패했습니다: {e}")
 
-        state = _initial_state(q, history)
+        state = _initial_state(q, coerced_history)
         timeout = max(10, self._cfg.llm.request_timeout + 30)
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -190,6 +215,33 @@ class RAGService:
 
         coerced_history = _coerce_history(history)
 
+        try:
+            llm_for_direct = self._ensure_llm()
+        except Exception as e:
+            log.exception("LLM 초기화 실패")
+            yield ChatResponseChunk(kind="meta")
+            yield ChatResponseChunk(kind="error", text=f"LLM 초기화 실패: {e}")
+            yield ChatResponseChunk(kind="done")
+            return
+
+        if _should_answer_directly(q):
+            yield ChatResponseChunk(
+                kind="meta",
+                citations=[],
+                used_mcp=False,
+                rewritten_question=None,
+                retrieval_count=0,
+            )
+            try:
+                for piece in llm_for_direct.chat_stream(q, coerced_history):
+                    if piece:
+                        yield ChatResponseChunk(kind="token", text=piece)
+            except Exception as e:
+                log.exception("일반 대화 스트리밍 실패")
+                yield ChatResponseChunk(kind="error", text=f"응답 오류: {e}")
+            yield ChatResponseChunk(kind="done")
+            return
+
         store = self._ensure_store()
         if store.count() == 0:
             yield ChatResponseChunk(kind="meta")
@@ -201,35 +253,6 @@ class RAGService:
             )
             return
 
-        # Intent 분류 — 일반 대화/인사면 RAG 그래프 우회하고 chat_stream 호출
-        try:
-            llm_for_intent = self._ensure_llm()
-        except Exception as e:
-            log.exception("LLM 초기화 실패")
-            yield ChatResponseChunk(kind="meta")
-            yield ChatResponseChunk(kind="error", text=f"LLM 초기화 실패: {e}")
-            yield ChatResponseChunk(kind="done")
-            return
-
-        intent = _classify_intent(llm_for_intent, q, coerced_history)
-        if intent == "chat":
-            yield ChatResponseChunk(
-                kind="meta",
-                citations=[],
-                used_mcp=False,
-                rewritten_question=None,
-                retrieval_count=0,
-            )
-            try:
-                for piece in llm_for_intent.chat_stream(q, coerced_history):
-                    if piece:
-                        yield ChatResponseChunk(kind="token", text=piece)
-            except Exception as e:
-                log.exception("일반 대화 스트리밍 실패")
-                yield ChatResponseChunk(kind="error", text=f"응답 오류: {e}")
-            yield ChatResponseChunk(kind="done")
-            return
-
         try:
             graph = self._ensure_graph_ctx()
         except Exception as e:
@@ -239,7 +262,7 @@ class RAGService:
             yield ChatResponseChunk(kind="done")
             return
 
-        state = _initial_state(q, history)
+        state = _initial_state(q, coerced_history)
         timeout = max(10, self._cfg.llm.request_timeout + 30)
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -286,8 +309,9 @@ class RAGService:
             return
 
         llm = self._ensure_llm()
+        generation_question = rewritten or q
         try:
-            for piece in llm.generate_stream(q, context_block):
+            for piece in llm.generate_stream(generation_question, context_block):
                 if piece:
                     yield ChatResponseChunk(kind="token", text=piece)
         except Exception as e:
@@ -309,6 +333,15 @@ def _initial_state(question: str, history: Any) -> dict:
         "used_mcp": False,
         "rewrites": 0,
     }
+
+
+def _should_answer_directly(question: str) -> bool:
+    return _chat_phrase_key(question) in _DIRECT_CHAT_PHRASES
+
+
+def _chat_phrase_key(question: str) -> str:
+    lowered = (question or "").strip().lower()
+    return re.sub(r"[\s.!?？。~…'\"`,，、:：;；]+", "", lowered)
 
 
 def _classify_intent(llm: Any, question: str, history: list[ChatMessage]) -> str:

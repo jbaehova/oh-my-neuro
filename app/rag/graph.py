@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict
@@ -59,9 +60,67 @@ class RAGState(TypedDict, total=False):
 Terminal = Literal["generate", "prepare_context"]
 
 
-def _is_law_question(question: str, cfg: AppConfig) -> bool:
+_LAW_TRIGGER_PHRASES = (
+    "헌법",
+    "형법",
+    "민법",
+    "상법",
+    "법률",
+    "법령",
+    "조항",
+    "판례",
+    "처벌",
+    "범죄",
+    "위반",
+    "저촉",
+    "법적",
+    "어떤 법",
+    "무슨 법",
+)
+
+_LAW_FOLLOW_UP_MARKERS = (
+    "조항",
+    "몇 조",
+    "몇 항",
+    "그 조",
+    "그 항",
+    "해당 조",
+    "해당 항",
+    "위 조",
+    "위 항",
+)
+
+
+def _is_law_question(
+    question: str,
+    cfg: AppConfig,
+    history: list[ChatMessage] | None = None,
+    original_question: str | None = None,
+) -> bool:
+    if _has_law_trigger(question, cfg):
+        return True
+    if not history or not _is_law_follow_up(original_question or question):
+        return False
+    return any(_has_law_trigger(m.content, cfg) for m in history[-4:] if m.role == "user")
+
+
+def _has_law_trigger(text: str, cfg: AppConfig) -> bool:
+    triggers = [kw for kw in [*cfg.mcp.law_keywords, *_LAW_TRIGGER_PHRASES] if kw.strip()]
+    lowered = text.lower()
+    compact = "".join(lowered.split())
+    for trigger in triggers:
+        needle = trigger.lower()
+        if needle in lowered or needle.replace(" ", "") in compact:
+            return True
+    return False
+
+
+def _is_law_follow_up(question: str) -> bool:
     text = question.lower()
-    return any(kw.lower() in text for kw in cfg.mcp.law_keywords)
+    compact = "".join(text.split())
+    if any(marker.replace(" ", "") in compact for marker in _LAW_FOLLOW_UP_MARKERS):
+        return True
+    return bool(re.search(r"(제\s*)?\d+\s*(조|항)", text))
 
 
 def _render_context(
@@ -113,6 +172,20 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
     max_rewrites = cfg.retrieval.max_rewrites
     threshold = cfg.retrieval.relevance_threshold
 
+    def prepare_query_node(state: RAGState) -> RAGState:
+        question = state["question"]
+        history = state.get("chat_history") or []
+        if not history:
+            return {"rewritten_question": None}
+        try:
+            new_q = deps.llm.rewrite(question, history).strip()
+        except Exception as e:
+            log.warning("initial rewrite 실패, 원본 유지: %s", e)
+            new_q = question
+        new_q = new_q or question
+        log.info("prepare_query: %r → %r", question[:60], new_q[:60])
+        return {"rewritten_question": new_q}
+
     def retrieve_node(state: RAGState) -> RAGState:
         q = state.get("rewritten_question") or state["question"]
         docs = deps.retriever.search(q, top_k=top_k, fetch_k=fetch_k)
@@ -162,7 +235,7 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
         return "rewrite"
 
     def rewrite_node(state: RAGState) -> RAGState:
-        question = state["question"]
+        question = state.get("rewritten_question") or state["question"]
         history = state.get("chat_history") or []
         try:
             new_q = deps.llm.rewrite(question, history)
@@ -174,8 +247,9 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
         return {"rewritten_question": new_q, "rewrites": rewrites}
 
     def route_node(state: RAGState) -> RAGState:
-        q = state["question"]
-        if deps.mcp and deps.mcp.is_available() and _is_law_question(q, cfg):
+        q = state.get("rewritten_question") or state["question"]
+        history = state.get("chat_history") or []
+        if deps.mcp and _is_law_question(q, cfg, history, state["question"]) and deps.mcp.is_available():
             return {"route": "mcp"}
         return {"route": "prepare_context"}
 
@@ -205,7 +279,7 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
         citations = state.get("citations") or []
         if not context:
             return {"answer": prompts.EMPTY_ANSWER, "citations": []}
-        question = state["question"]
+        question = state.get("rewritten_question") or state["question"]
         try:
             answer = deps.llm.generate(question, context)
         except Exception as e:
@@ -214,6 +288,7 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
         return {"answer": answer, "citations": citations}
 
     graph = StateGraph(RAGState)
+    graph.add_node("prepare_query", prepare_query_node)
     graph.add_node("retrieve", retrieve_node)
     graph.add_node("grade", grade_node)
     graph.add_node("rewrite", rewrite_node)
@@ -223,7 +298,8 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
     if terminal == "generate":
         graph.add_node("generate", generate_node)
 
-    graph.add_edge(START, "retrieve")
+    graph.add_edge(START, "prepare_query")
+    graph.add_edge("prepare_query", "retrieve")
     graph.add_edge("retrieve", "grade")
     graph.add_conditional_edges("grade", should_rewrite, {"rewrite": "rewrite", "route": "route"})
     graph.add_edge("rewrite", "retrieve")
@@ -247,6 +323,7 @@ def describe() -> dict:
     """그래프 노드 구조 설명 (테스트/디버그용)."""
     return {
         "nodes": [
+            "prepare_query",
             "retrieve",
             "grade",
             "rewrite",
