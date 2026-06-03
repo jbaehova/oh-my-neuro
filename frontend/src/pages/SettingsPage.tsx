@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { Save, Trash2 } from "lucide-react";
+import { KeyRound, Save, Trash2 } from "lucide-react";
 
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { clearIndex, getSettings, patchSettings, Settings } from "@/lib/api";
+import { clearIndex, getSettings, patchSettings, setApiKey, Settings } from "@/lib/api";
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -46,6 +46,10 @@ export function SettingsPage() {
         description="현재 프로세스에 적용되는 검색 및 MCP 설정입니다. 파일 기반 설정은 app.yaml에서 관리합니다."
         action={<Badge variant={settings?.api_key_configured ? "secondary" : "warning"}>{settings?.api_key_configured ? "OPENAI_API_KEY OK" : "OPENAI_API_KEY 없음"}</Badge>}
       />
+
+      {settings && !settings.api_key_configured && (
+        <ApiKeyCard onSaved={setSettings} />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <section className="surface rounded-lg p-5">
@@ -89,6 +93,78 @@ export function SettingsPage() {
         </aside>
       </div>
     </>
+  );
+}
+
+function ApiKeyCard({ onSaved }: { onSaved: (settings: Settings) => void }) {
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    const key = draft.trim();
+    if (!key) {
+      setError("API 키를 입력하세요.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const next = await setApiKey(key);
+      setDraft("");
+      onSaved(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "저장에 실패했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="surface mb-6 rounded-lg border border-accent/30 bg-accent/10 p-5">
+      <div className="flex items-center gap-2">
+        <KeyRound className="size-4 text-accent" />
+        <h2 className="text-base font-semibold">OpenAI API 키 설정이 필요합니다</h2>
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">
+        답변 생성과 문서 검색에는 OpenAI API 키가 필요합니다. 아래에 키를 입력해 저장하면
+        프로젝트 루트의 <code className="rounded bg-muted px-1">.env</code> 파일에 저장되고 즉시 적용됩니다
+        (서버 재시작 불필요).
+      </p>
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <Input
+          type="password"
+          autoComplete="off"
+          placeholder="sk-..."
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void save();
+          }}
+        />
+        <Button onClick={() => void save()} disabled={saving} type="button">
+          <Save className="size-4" />
+          {saving ? "저장 중..." : "저장"}
+        </Button>
+      </div>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+
+      <details className="mt-4 text-xs text-muted-foreground">
+        <summary className="cursor-pointer select-none">직접 .env 파일로 설정하는 방법</summary>
+        <ol className="mt-2 list-decimal space-y-1 pl-5">
+          <li>프로젝트 루트에 <code className="rounded bg-muted px-1">.env</code> 파일을 만듭니다 (<code className="rounded bg-muted px-1">.env.example</code> 복사).</li>
+          <li>아래 한 줄을 추가합니다.</li>
+        </ol>
+        <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 text-foreground">OPENAI_API_KEY=sk-여기에-키-입력</pre>
+        <p className="mt-1">3. 서버를 재시작합니다. 키는{" "}
+          <a className="underline" href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">
+            platform.openai.com/api-keys
+          </a>
+          에서 발급할 수 있습니다.
+        </p>
+      </details>
+    </section>
   );
 }
 

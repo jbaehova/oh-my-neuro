@@ -88,7 +88,7 @@ class RAGService:
             return ChatResponse(
                 answer=(
                     "OPENAI_API_KEY가 설정되어 있지 않습니다. "
-                    "프로젝트 루트에 `.env` 파일을 만들고 `OPENAI_API_KEY=...`를 지정하세요."
+                    "Settings에서 OpenAI API 키 설정을 완료하세요."
                 )
             )
 
@@ -166,7 +166,7 @@ class RAGService:
                 kind="done",
                 text=(
                     "OPENAI_API_KEY가 설정되어 있지 않습니다. "
-                    "프로젝트 루트에 `.env` 파일을 만들고 `OPENAI_API_KEY=...`를 지정하세요."
+                    "Settings에서 OpenAI API 키 설정을 완료하세요."
                 ),
             )
             return
