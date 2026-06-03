@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 try:
     from dotenv import load_dotenv
@@ -152,6 +152,12 @@ class AppConfig(BaseModel):
 
     openai_api_key: str = ""
     config_source: str = ""
+
+    @model_validator(mode="after")
+    def _exclude_wiki_directory(self) -> AppConfig:
+        if self.wiki.directory not in self.vault.excluded_dirs:
+            self.vault.excluded_dirs = [*self.vault.excluded_dirs, self.wiki.directory]
+        return self
 
     def ensure_dirs(self) -> None:
         self.storage.chroma_path_abs.mkdir(parents=True, exist_ok=True)

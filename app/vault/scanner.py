@@ -34,7 +34,7 @@ def compute_hash(path: Path) -> str:
 def _is_excluded_dir(name: str, excluded: list[str]) -> bool:
     if name.startswith("."):
         return True
-    return name == "_omn_wiki" or name in excluded
+    return name in excluded
 
 
 def scan_vault(

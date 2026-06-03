@@ -10,6 +10,10 @@ import { Input } from "@/components/ui/input";
 import { getWikiLint, getWikiPage, getWikiPages, getWikiStatus, rebuildWiki, WikiLintIssue, WikiPageContent, WikiPageSummary, WikiStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+type LoadOptions = {
+  selectFirst?: boolean;
+};
+
 export function WikiPage() {
   const [status, setStatus] = useState<WikiStatus | null>(null);
   const [pages, setPages] = useState<WikiPageSummary[]>([]);
@@ -20,7 +24,7 @@ export function WikiPage() {
   const [rebuilding, setRebuilding] = useState(false);
   const [error, setError] = useState("");
 
-  async function load(nextQuery = query) {
+  async function load(nextQuery = query, options: LoadOptions = {}) {
     setLoading(true);
     setError("");
     try {
@@ -32,7 +36,7 @@ export function WikiPage() {
       setStatus(nextStatus);
       setPages(nextPages);
       setIssues(nextIssues);
-      if (!selected && nextPages[0]) {
+      if ((options.selectFirst || !selected) && nextPages[0]) {
         const first = await getWikiPage(nextPages[0].id);
         setSelected(first);
       }
@@ -44,14 +48,14 @@ export function WikiPage() {
   }
 
   useEffect(() => {
-    void load("");
+    void load("", { selectFirst: true });
     // Initial load only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function search() {
     setSelected(null);
-    await load(query);
+    await load(query, { selectFirst: true });
   }
 
   async function choose(page: WikiPageSummary) {
@@ -64,7 +68,7 @@ export function WikiPage() {
     try {
       await rebuildWiki();
       setSelected(null);
-      await load(query);
+      await load(query, { selectFirst: true });
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Wiki 재생성에 실패했습니다.");
     } finally {

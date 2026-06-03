@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from app.config.loader import MCPServerSpec, VaultSection, WikiSection
+from app.config.loader import AppConfig, MCPServerSpec, VaultSection, WikiSection
 
 
 def test_blank_vault_path_is_unset() -> None:
@@ -10,6 +10,13 @@ def test_blank_vault_path_is_unset() -> None:
 def test_wiki_directory_is_normalized() -> None:
     assert WikiSection(directory="/_omn_wiki/").directory == "_omn_wiki"
     assert "_omn_wiki" in VaultSection().excluded_dirs
+
+
+def test_custom_wiki_directory_is_excluded_from_vault_scan() -> None:
+    cfg = AppConfig(wiki={"directory": "generated-wiki"}, vault={"excluded_dirs": ["cache"]})
+
+    assert "cache" in cfg.vault.excluded_dirs
+    assert "generated-wiki" in cfg.vault.excluded_dirs
 
 
 def test_stdio_mcp_spec_expands_environment(monkeypatch) -> None:

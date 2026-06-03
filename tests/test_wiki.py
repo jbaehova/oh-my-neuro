@@ -21,13 +21,13 @@ class FakeLLM:
 """
 
 
-def test_scan_vault_excludes_generated_wiki(tmp_path: Path) -> None:
+def test_scan_vault_excludes_configured_generated_wiki(tmp_path: Path) -> None:
     (tmp_path / "keep.md").write_text("keep", encoding="utf-8")
-    wiki_dir = tmp_path / "_omn_wiki"
+    wiki_dir = tmp_path / "generated-wiki"
     wiki_dir.mkdir()
     (wiki_dir / "generated.md").write_text("generated", encoding="utf-8")
 
-    cfg = AppConfig(vault={"path": str(tmp_path)})
+    cfg = AppConfig(vault={"path": str(tmp_path)}, wiki={"directory": "generated-wiki"})
     entries, skipped = scan_vault(tmp_path, cfg.vault)
 
     assert [entry.relative_path for entry in entries] == ["keep.md"]
