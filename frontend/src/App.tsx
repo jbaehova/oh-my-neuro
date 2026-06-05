@@ -8,6 +8,7 @@ import { ChatPage } from "@/pages/ChatPage";
 import { OnboardingPage } from "@/pages/OnboardingPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { VaultPage } from "@/pages/VaultPage";
+import { WikiDetailPage } from "@/pages/WikiDetailPage";
 import { WikiPage } from "@/pages/WikiPage";
 
 export function App() {
@@ -44,6 +45,7 @@ export function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/vault" element={<VaultPage />} />
         <Route path="/wiki" element={<WikiPage />} />
+        <Route path="/wiki/detail" element={<WikiDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
     </Routes>

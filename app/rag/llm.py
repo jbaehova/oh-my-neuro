@@ -172,6 +172,52 @@ class OpenAILLM:
         return _content_to_text(resp.content).strip()
 
     @_retry
+    def wiki_contradiction_check(
+        self,
+        *,
+        concept: str,
+        source_a: str,
+        description_a: str,
+        source_b: str,
+        description_b: str,
+    ) -> bool:
+        from app.wiki import prompts as wiki_prompts
+
+        content = [
+            ("system", wiki_prompts.WIKI_CONTRADICTION_SYSTEM),
+            (
+                "user",
+                wiki_prompts.WIKI_CONTRADICTION_USER.format(
+                    concept=concept,
+                    source_a=source_a,
+                    description_a=description_a,
+                    source_b=source_b,
+                    description_b=description_b,
+                ),
+            ),
+        ]
+        resp = self._chat.invoke(content)
+        text = _content_to_text(resp.content).strip().lower()
+        return text.startswith("yes")
+
+    @_retry
+    def wiki_concept_page(self, *, concept: str, source_blocks: str) -> str:
+        from app.wiki import prompts as wiki_prompts
+
+        content = [
+            ("system", wiki_prompts.WIKI_CONCEPT_SYSTEM),
+            (
+                "user",
+                wiki_prompts.WIKI_CONCEPT_USER.format(
+                    concept=concept,
+                    source_blocks=source_blocks,
+                ),
+            ),
+        ]
+        resp = self._chat.invoke(content)
+        return _content_to_text(resp.content).strip()
+
+    @_retry
     def classify_intent(
         self, question: str, history: list[ChatMessage] | None = None
     ) -> str:

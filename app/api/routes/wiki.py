@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.api.deps import effective_config
-from app.wiki.models import WikiBuildResult, WikiLintIssue, WikiPageContent, WikiPageSummary, WikiStatus
+from app.wiki.models import WikiBuildResult, WikiGraph, WikiLintIssue, WikiPageContent, WikiPageSummary, WikiStatus
 from app.wiki.service import WikiService
 
 router = APIRouter(prefix="/wiki", tags=["wiki"])
@@ -30,8 +30,8 @@ def page(id: str) -> WikiPageContent:
 
 
 @router.post("/rebuild", response_model=WikiBuildResult)
-def rebuild() -> WikiBuildResult:
-    result = WikiService(effective_config()).rebuild()
+def rebuild(force: bool = True) -> WikiBuildResult:
+    result = WikiService(effective_config()).rebuild(force=force)
     if result.error:
         raise HTTPException(status_code=400, detail=result.error)
     return result
@@ -40,3 +40,8 @@ def rebuild() -> WikiBuildResult:
 @router.get("/lint", response_model=list[WikiLintIssue])
 def lint() -> list[WikiLintIssue]:
     return WikiService(effective_config()).lint()
+
+
+@router.get("/graph", response_model=WikiGraph)
+def graph() -> WikiGraph:
+    return WikiService(effective_config()).build_graph()
