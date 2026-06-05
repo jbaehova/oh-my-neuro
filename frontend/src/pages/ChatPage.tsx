@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useSessions, newSessionId } from "@/hooks/useSessions";
-import { ChatMessage, Citation, streamChat } from "@/lib/api";
+import { ChatMessage, Citation, openFile, streamChat } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type RichMessage = ChatMessage & {
@@ -319,10 +319,23 @@ function MessageBubble({ message, onOpenWiki }: { message: RichMessage; onOpenWi
                   </Badge>
                 </button>
               ) : (
-                <Badge key={`${citation.source}-${index}`} variant="outline" className="max-w-full truncate">
-                  {index + 1}. {citation.source}
-                  {citation.page ? ` p.${citation.page}` : ""}
-                </Badge>
+                <button
+                  key={`${citation.source}-${index}`}
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await openFile(citation.source);
+                    } catch {
+                      // ignore - 파일 열기에 실패해도 사용자가 직접 찾아볼 수 있도록 링크는 유지
+                    }
+                  }}
+                  className="max-w-full truncate"
+                >
+                  <Badge variant="outline" className="cursor-pointer hover:bg-secondary/80">
+                    {index + 1}. {citation.source}
+                    {citation.page ? ` p.${citation.page}` : ""}
+                  </Badge>
+                </button>
               )
             ))}
           </div>

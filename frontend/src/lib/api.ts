@@ -211,6 +211,10 @@ export async function getWikiGraph(): Promise<WikiGraph> {
   return request("/api/wiki/graph");
 }
 
+export async function openFile(source: string): Promise<void> {
+  await request(`/api/vault/files/open?source=${encodeURIComponent(source)}`);
+}
+
 export async function* streamChat(question: string, history: ChatMessage[]): AsyncGenerator<ChatChunk> {
   yield* requestStream<ChatChunk>("/api/chat/stream", {
     method: "POST",
