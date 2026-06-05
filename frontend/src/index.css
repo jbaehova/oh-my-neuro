@@ -75,4 +75,185 @@
   .scrollbar-soft {
     scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
   }
+
+  /* Wiki card-news layout */
+  .wiki-card-feed {
+    @apply space-y-5;
+  }
+
+  .wiki-action-row {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .wiki-hero-card {
+    @apply border border-primary/20 bg-gradient-to-br from-primary/[0.14] via-background to-background shadow-md shadow-primary/5;
+  }
+
+  .wiki-hero-glow {
+    background: radial-gradient(circle, hsl(var(--primary) / 0.22) 0%, transparent 70%);
+  }
+
+  .wiki-chip {
+    @apply rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-semibold text-primary;
+  }
+
+  .wiki-chip-muted {
+    @apply rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground;
+  }
+
+  .wiki-story-card {
+    @apply bg-background/80 shadow-sm transition-shadow hover:shadow-md;
+  }
+
+  .wiki-source-card {
+    @apply bg-background/80 shadow-sm;
+  }
+
+  .wiki-topic-banner {
+    @apply border border-primary/20 bg-background/95 shadow-sm shadow-black/10 backdrop-blur;
+  }
+
+  .wiki-detail-shell {
+    @apply mx-auto max-w-5xl space-y-6 pb-10;
+  }
+
+  .wiki-detail-hero {
+    @apply border border-primary/20 bg-gradient-to-br from-primary/[0.14] via-background to-background shadow-md shadow-primary/5;
+  }
+
+  .wiki-detail-grid {
+    @apply grid gap-3 md:grid-cols-2;
+  }
+
+  .wiki-verify-card {
+    @apply border border-amber-400/25 bg-amber-400/[0.07];
+  }
+
+  .wiki-alert-card {
+    @apply border border-destructive/30 bg-destructive/[0.07] text-destructive;
+  }
+
+  .wiki-snap-row {
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .wiki-snap-card {
+    scroll-snap-align: start;
+    @apply bg-background/90 shadow-sm;
+  }
+
+  .wiki-accent-teal {
+    border-color: hsl(var(--primary) / 0.22);
+    background: linear-gradient(135deg, hsl(var(--primary) / 0.06) 0%, transparent 60%);
+  }
+
+  .wiki-accent-amber {
+    border-color: hsl(43 90% 55% / 0.25);
+    background: linear-gradient(135deg, hsl(43 90% 55% / 0.08) 0%, transparent 60%);
+  }
+
+  .wiki-accent-violet {
+    border-color: hsl(270 50% 60% / 0.25);
+    background: linear-gradient(135deg, hsl(270 50% 60% / 0.08) 0%, transparent 60%);
+  }
+
+  .wiki-accent-slate {
+    border-color: hsl(var(--border));
+    background: linear-gradient(135deg, hsl(var(--muted) / 0.5) 0%, transparent 60%);
+  }
+
+  .wiki-accent-rose {
+    border-color: hsl(350 60% 55% / 0.25);
+    background: linear-gradient(135deg, hsl(350 60% 55% / 0.07) 0%, transparent 60%);
+  }
+
+  .wiki-accent-gold {
+    border-color: hsl(43 90% 55% / 0.3);
+  }
+
+  /* Wiki article layout */
+  .wiki-article {
+    @apply text-foreground;
+  }
+
+  .wiki-article-header {
+    border-color: hsl(var(--border));
+  }
+
+  .wiki-article-section h2 {
+    @apply text-foreground;
+  }
+
+  .wiki-bullet-list li {
+    @apply text-foreground/90;
+  }
+
+  .wiki-bullet-list-warning li {
+    @apply text-foreground/85;
+  }
+
+  .wiki-source-pill {
+    @apply bg-background/80 text-foreground;
+  }
+
+  .wiki-source-card {
+    @apply bg-background/80;
+  }
+
+  .wiki-question-chip {
+    @apply bg-background/70 text-foreground;
+  }
+
+  .wiki-empty-state {
+    @apply bg-muted/20 text-foreground;
+  }
+
+  .wiki-verify-subtle {
+    @apply border border-border/80 bg-muted/30;
+  }
+
+  .wiki-alert-subtle {
+    @apply border border-destructive/20 bg-destructive/[0.05] text-destructive/90;
+  }
+
+  .wiki-prose {
+    @apply text-[15px] leading-7 text-foreground/90;
+  }
+
+  .wiki-note-sheet {
+    @apply rounded-2xl border bg-background/60 p-4 sm:p-6;
+  }
+
+  .wiki-note-sheet-body {
+    @apply space-y-4;
+  }
+
+  .wiki-note-block {
+    @apply border-border/80 bg-background/80;
+  }
+
+  .wiki-note-block-overview {
+    @apply border-primary/15 bg-primary/[0.04];
+  }
+
+  .wiki-note-block-warning {
+    @apply border-amber-500/20 bg-amber-500/[0.04];
+  }
+
+  .wiki-note-block-main {
+    @apply border-border/80 bg-background;
+  }
+
+  .wiki-doc-meta {
+    border-color: hsl(var(--border));
+  }
+
+  .wiki-bullet-list-main {
+    @apply space-y-3;
+  }
+
+  .wiki-bullet-list-main li {
+    @apply rounded-lg border border-transparent bg-muted/20 px-3 py-2.5 leading-7;
+  }
 }

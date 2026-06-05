@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { FolderOpen, RefreshCw, Search, Trash2 } from "lucide-react";
 
 import { EmptyState } from "@/components/EmptyState";
@@ -10,9 +11,10 @@ import { Progress } from "@/components/ui/progress";
 import { clearIndex, getFiles, getVaultStatus, IndexedFile, streamSync, SyncEvent, VaultStatus } from "@/lib/api";
 
 export function VaultPage() {
+  const [params] = useSearchParams();
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [files, setFiles] = useState<IndexedFile[]>([]);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => params.get("q") || "");
   const [syncing, setSyncing] = useState(false);
   const [syncEvent, setSyncEvent] = useState<SyncEvent | null>(null);
 
@@ -25,6 +27,11 @@ export function VaultPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    const q = params.get("q");
+    if (q) setQuery(q);
+  }, [params]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

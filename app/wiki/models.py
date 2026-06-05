@@ -17,10 +17,20 @@ class WikiSourceState(BaseModel):
     excerpt: str = ""
 
 
+class WikiContradiction(BaseModel):
+    concept: str
+    source_a: str
+    source_b: str
+    description_a: str
+    description_b: str
+    summary: str
+
+
 class WikiState(BaseModel):
     version: int = 1
     last_built_at: str | None = None
     sources: dict[str, WikiSourceState] = Field(default_factory=dict)
+    contradictions: list[WikiContradiction] = Field(default_factory=list)
 
 
 class WikiStatus(BaseModel):
@@ -46,6 +56,7 @@ class WikiPageSummary(BaseModel):
 
 class WikiPageContent(WikiPageSummary):
     content: str
+    linked_source_pages: list[str] = Field(default_factory=list)
 
 
 class WikiBuildResult(BaseModel):
@@ -63,3 +74,21 @@ class WikiLintIssue(BaseModel):
     message: str
     page: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WikiGraphNode(BaseModel):
+    id: str
+    label: str
+    kind: Literal["concept", "source", "page"]
+    page_id: str
+
+
+class WikiGraphEdge(BaseModel):
+    source: str
+    target: str
+    label: str = ""
+
+
+class WikiGraph(BaseModel):
+    nodes: list[WikiGraphNode] = Field(default_factory=list)
+    edges: list[WikiGraphEdge] = Field(default_factory=list)

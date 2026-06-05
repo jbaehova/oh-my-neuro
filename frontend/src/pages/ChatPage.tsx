@@ -1,8 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Copy, Loader2, Send, StopCircle } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { BookOpen, Copy, Loader2, Send, StopCircle, X } from "lucide-react";
+import { MarkdownContent } from "@/components/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,12 +17,20 @@ type RichMessage = ChatMessage & {
   used_mcp?: boolean;
 };
 
+type TopicContext = {
+  title: string;
+  page: string;
+  summary: string;
+};
+
 export function ChatPage() {
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const sessions = useSessions();
   const [sessionId, setSessionId] = useState(() => params.get("session") || newSessionId());
   const [messages, setMessages] = useState<RichMessage[]>([]);
   const [input, setInput] = useState("");
+  const [topic, setTopic] = useState<TopicContext | null>(null);
   const [running, setRunning] = useState(false);
   const cancelRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -43,6 +50,30 @@ export function ChatPage() {
   }, [params, sessionId, setParams]);
 
   useEffect(() => {
+    const prompt = params.get("prompt");
+    if (prompt) {
+      setInput(prompt);
+      const next = new URLSearchParams(params);
+      next.delete("prompt");
+      setParams(next, { replace: true });
+    }
+  }, [params, setParams]);
+
+  useEffect(() => {
+    const title = params.get("topicTitle");
+    const page = params.get("topicPage");
+    const summary = params.get("topicSummary");
+    if (title && page) {
+      setTopic({ title, page, summary: summary || "" });
+      const next = new URLSearchParams(params);
+      next.delete("topicTitle");
+      next.delete("topicPage");
+      next.delete("topicSummary");
+      setParams(next, { replace: true });
+    }
+  }, [params, setParams]);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, running]);
 
@@ -55,6 +86,7 @@ export function ChatPage() {
     event?.preventDefault();
     const question = input.trim();
     if (!question || running) return;
+    const requestQuestion = topic ? withTopicContext(question, topic) : question;
     cancelRef.current = false;
     setInput("");
     setRunning(true);
@@ -68,7 +100,7 @@ export function ChatPage() {
     let wikiCount = 0;
     let usedMcp = false;
     try {
-      for await (const chunk of streamChat(question, history)) {
+      for await (const chunk of streamChat(requestQuestion, history)) {
         if (cancelRef.current) break;
         if (chunk.kind === "meta") {
           citations = chunk.citations || [];
@@ -154,7 +186,7 @@ export function ChatPage() {
         )}
 
         {messages.map((message, index) => (
-          <MessageBubble key={`${index}-${message.role}`} message={message} />
+          <MessageBubble key={`${index}-${message.role}`} message={message} onOpenWiki={(pageId) => navigate(`/wiki?page=${encodeURIComponent(pageId)}`)} />
         ))}
         {running && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -166,6 +198,25 @@ export function ChatPage() {
       </div>
 
       <form onSubmit={submit} className="fixed bottom-16 left-4 right-4 lg:bottom-4 lg:left-[17rem] lg:right-8">
+        {topic ? (
+          <div className="wiki-topic-banner mx-auto mb-2 flex max-w-4xl items-center justify-between gap-3 rounded-lg px-3 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <BookOpen className="size-4 shrink-0 text-primary" />
+              <div className="min-w-0">
+                <div className="truncate text-xs font-semibold">현재 주제: {topic.title}</div>
+                {topic.summary ? <div className="truncate text-[11px] text-muted-foreground">{topic.summary}</div> : null}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <Button type="button" variant="outline" size="sm" onClick={() => navigate(`/wiki?page=${encodeURIComponent(topic.page)}`)}>
+                Wiki 보기
+              </Button>
+              <Button type="button" variant="outline" size="icon" onClick={() => setTopic(null)} title="주제 해제">
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <div className="surface mx-auto flex max-w-4xl items-end gap-2 rounded-lg p-2">
           <Textarea
             value={input}
@@ -188,7 +239,20 @@ export function ChatPage() {
   );
 }
 
-function MessageBubble({ message }: { message: RichMessage }) {
+function withTopicContext(question: string, topic: TopicContext) {
+  return [
+    "[현재 Wiki 주제]",
+    `제목: ${topic.title}`,
+    topic.summary ? `요약: ${topic.summary}` : "",
+    `Wiki page: ${topic.page}`,
+    "",
+    `사용자 질문: ${question}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function MessageBubble({ message, onOpenWiki }: { message: RichMessage; onOpenWiki: (pageId: string) => void }) {
   const isUser = message.role === "user";
 
   return (
@@ -203,34 +267,7 @@ function MessageBubble({ message }: { message: RichMessage }) {
           <div className="whitespace-pre-wrap">{message.content}</div>
         ) : (
           <div className="space-y-2">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                h1: ({ children }) => <h1 className="text-xl font-semibold">{children}</h1>,
-                h2: ({ children }) => <h2 className="text-lg font-semibold">{children}</h2>,
-                h3: ({ children }) => <h3 className="text-base font-semibold">{children}</h3>,
-                p: ({ children }) => <p className="leading-7">{children}</p>,
-                ul: ({ children }) => <ul className="list-disc space-y-1 pl-5">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal space-y-1 pl-5">{children}</ol>,
-                li: ({ children }) => <li>{children}</li>,
-                code: ({ children }) => (
-                  <code className="rounded bg-muted px-1 py-0.5 text-xs">{children}</code>
-                ),
-                pre: ({ children }) => (
-                  <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">{children}</pre>
-                ),
-                blockquote: ({ children }) => (
-                  <blockquote className="border-l-4 pl-4 text-muted-foreground">{children}</blockquote>
-                ),
-                a: ({ href, children }) => (
-                  <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-4">
-                    {children}
-                  </a>
-                ),
-              }}
-            >
-              {message.content || "..."}
-            </ReactMarkdown>
+            <MarkdownContent content={message.content || "..."} />
           </div>
         )}
 
@@ -247,11 +284,24 @@ function MessageBubble({ message }: { message: RichMessage }) {
             )}
             {message.used_mcp && <Badge variant="warning">MCP</Badge>}
             {message.citations?.map((citation, index) => (
-              <Badge key={`${citation.source}-${index}`} variant={citation.kind === "wiki" ? "secondary" : "outline"} className="max-w-full truncate">
-                {index + 1}. {citation.kind === "wiki" ? "Wiki: " : ""}
-                {citation.source}
-                {citation.page ? ` p.${citation.page}` : ""}
-              </Badge>
+              citation.kind === "wiki" ? (
+                <button
+                  key={`${citation.source}-${index}`}
+                  type="button"
+                  onClick={() => onOpenWiki(citation.source)}
+                  className="max-w-full truncate"
+                >
+                  <Badge variant="secondary" className="cursor-pointer hover:bg-secondary/80">
+                    {index + 1}. Wiki: {citation.source}
+                    {citation.page ? ` p.${citation.page}` : ""}
+                  </Badge>
+                </button>
+              ) : (
+                <Badge key={`${citation.source}-${index}`} variant="outline" className="max-w-full truncate">
+                  {index + 1}. {citation.source}
+                  {citation.page ? ` p.${citation.page}` : ""}
+                </Badge>
+              )
             ))}
           </div>
         )}

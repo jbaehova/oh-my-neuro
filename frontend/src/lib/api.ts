@@ -110,6 +110,7 @@ export type WikiPageSummary = {
 
 export type WikiPageContent = WikiPageSummary & {
   content: string;
+  linked_source_pages?: string[];
 };
 
 export type WikiBuildResult = {
@@ -127,6 +128,24 @@ export type WikiLintIssue = {
   message: string;
   page?: string;
   metadata?: Record<string, unknown>;
+};
+
+export type WikiGraphNode = {
+  id: string;
+  label: string;
+  kind: "concept" | "source" | "page";
+  page_id: string;
+};
+
+export type WikiGraphEdge = {
+  source: string;
+  target: string;
+  label?: string;
+};
+
+export type WikiGraph = {
+  nodes: WikiGraphNode[];
+  edges: WikiGraphEdge[];
 };
 
 export async function getBootstrap(): Promise<Bootstrap> {
@@ -180,12 +199,16 @@ export async function getWikiPage(id: string): Promise<WikiPageContent> {
   return request(`/api/wiki/page?id=${encodeURIComponent(id)}`);
 }
 
-export async function rebuildWiki(): Promise<WikiBuildResult> {
-  return request("/api/wiki/rebuild", { method: "POST" });
+export async function rebuildWiki(force = true): Promise<WikiBuildResult> {
+  return request(`/api/wiki/rebuild?force=${force ? "true" : "false"}`, { method: "POST" });
 }
 
 export async function getWikiLint(): Promise<WikiLintIssue[]> {
   return request("/api/wiki/lint");
+}
+
+export async function getWikiGraph(): Promise<WikiGraph> {
+  return request("/api/wiki/graph");
 }
 
 export async function* streamChat(question: string, history: ChatMessage[]): AsyncGenerator<ChatChunk> {

@@ -39,3 +39,6 @@ data/uploads/*
 
 # Git worktrees (superpowers development)
 .worktrees/
+frontend/dist/
+.env
+app/vault/law_office_vault/
