@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { ChatMessage } from "@/lib/api";
 
@@ -10,8 +10,16 @@ type SessionIndex = {
 
 const INDEX_KEY = "omn-react-sessions";
 
+const SYNC_EVENT = "omn-sessions-updated";
+
 export function useSessions() {
   const [sessions, setSessions] = useState<SessionIndex[]>(readIndex);
+
+  useEffect(() => {
+    const onUpdate = () => setSessions(readIndex());
+    window.addEventListener(SYNC_EVENT, onUpdate);
+    return () => window.removeEventListener(SYNC_EVENT, onUpdate);
+  }, []);
 
   return useMemo(
     () => ({
@@ -34,12 +42,14 @@ export function useSessions() {
         ].slice(0, 30);
         localStorage.setItem(INDEX_KEY, JSON.stringify(next));
         setSessions(next);
+        window.dispatchEvent(new CustomEvent(SYNC_EVENT));
       },
       remove(id: string) {
         localStorage.removeItem(sessionKey(id));
         const next = sessions.filter((s) => s.id !== id);
         localStorage.setItem(INDEX_KEY, JSON.stringify(next));
         setSessions(next);
+        window.dispatchEvent(new CustomEvent(SYNC_EVENT));
       },
     }),
     [sessions],
