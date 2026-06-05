@@ -25,6 +25,7 @@ export function ChatPage() {
   const [messages, setMessages] = useState<RichMessage[]>([]);
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
+  const [copied, setCopied] = useState(false);
   const cancelRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -128,9 +129,16 @@ export function ChatPage() {
           <h1 className="text-2xl font-semibold">Chat</h1>
           <p className="text-sm text-muted-foreground">Vault 문서를 검색하고 출처가 붙은 답변을 생성합니다.</p>
         </div>
-        <Button variant="outline" onClick={() => navigator.clipboard.writeText(window.location.href)}>
+        <Button
+          variant="outline"
+          onClick={async () => {
+            await navigator.clipboard.writeText(window.location.href);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+        >
           <Copy className="size-4" />
-          Link
+          {copied ? "Copied!" : "Copy Link"}
         </Button>
       </div>
 
