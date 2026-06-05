@@ -205,7 +205,7 @@ class RAGService:
         if not self._cfg.has_api_key():
             yield ChatResponseChunk(kind="meta")
             yield ChatResponseChunk(
-                kind="done",
+                kind="error",
                 text=(
                     "OPENAI_API_KEY가 설정되어 있지 않습니다. "
                     "프로젝트 루트에 `.env` 파일을 만들고 `OPENAI_API_KEY=...`를 지정하세요."
