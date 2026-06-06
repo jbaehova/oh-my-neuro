@@ -27,6 +27,9 @@ source .venv/bin/activate
 uv pip install -e .[dev]
 ```
 
+PDF 인덱싱은 기본적으로 PyMuPDF 기반 파서를 먼저 사용하고, 실패하면 기존 `pypdf`로 폴백합니다.
+스캔 PDF OCR까지 사용하려면 Tesseract와 한국어/영어 언어 데이터를 별도로 설치해야 합니다.
+
 ### 3. 환경 변수 설정
 
 ```bash
@@ -60,8 +63,10 @@ http://127.0.0.1:7860
 
 ## MCP 외부 서버 설정
 
-MCP는 기본적으로 `configs/app.yaml`의 전역 토글이 꺼져 있습니다.
-UI의 Settings 화면에서 MCP를 켜면 `configs/mcp_servers.yaml`에 활성화된 서버가 로드됩니다.
+MCP는 기본적으로 켜져 있으며, 설치 직후 법률 검색 서버와 웹검색 서버가 함께 등록됩니다.
+기본 번들 설정은 `configs/mcp_servers.yaml`에 있고, 사용자가 UI에서 추가/수정/삭제한 서버는
+`~/.oh-my-neuro/mcp_servers.yaml`에 저장됩니다. Settings 화면 진입만으로는 MCP 서버를 실행하지 않고,
+`연결 테스트`를 누르거나 Chat에서 실제 검색이 필요할 때 연결합니다.
 
 ```yaml
 servers:
@@ -69,9 +74,21 @@ servers:
     transport: stdio
     command: uvx
     args:
-      - mcp-server-korean-law
-    env: {}
+      - korean-law-mcp
+    env:
+      OPEN_LAW_ID: $OPEN_LAW_ID
+    enabled: true
+  web_search:
+    transport: stdio
+    command: uvx
+    args:
+      - duckduckgo-mcp-server
+    env:
+      DDG_REGION: kr-kr
+      DDG_SAFE_SEARCH: moderate
     enabled: true
 ```
 
-HTTP/SSE 기반 외부 MCP 서버는 `transport`, `url`, `headers`를 같은 파일에 추가해 사용할 수 있습니다.
+웹검색은 Chat 입력창에서 기본 ON입니다. 다만 로컬 Vault/Wiki 근거가 충분한 일반 문서 질문은 외부 웹검색을
+호출하지 않고, 최신/오늘/뉴스 같은 질문이나 내부 근거가 부족한 질문에서 웹검색 MCP를 사용합니다.
+HTTP/SSE 기반 외부 MCP 서버는 Settings 화면에서 `transport`, `url`, `headers`를 입력해 추가할 수 있습니다.

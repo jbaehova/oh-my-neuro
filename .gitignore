@@ -5,6 +5,8 @@
 .docs/
 .mock_data
 AGENTS.md
+CLAUDE.md
+.playwright-cli/
 
 # Python
 __pycache__/
