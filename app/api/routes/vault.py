@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import platform
 import queue
+import subprocess
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -59,6 +62,27 @@ def files() -> IndexedFilesResponse:
     cfg = effective_config()
     rows = list_indexed_sources(config=cfg)
     return IndexedFilesResponse(files=rows)
+
+
+@router.get("/files/open")
+def open_file(source: str) -> dict:
+    cfg = effective_config()
+    vault_root = cfg.vault.path_abs
+    if vault_root is None:
+        raise HTTPException(status_code=400, detail="Vault 경로가 설정되어 있지 않습니다.")
+    file_path = (vault_root / source).resolve()
+    if not file_path.is_relative_to(vault_root.resolve()):
+        raise HTTPException(status_code=403, detail="허용되지 않는 경로입니다.")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"파일을 찾을 수 없습니다: {source}")
+    system = platform.system()
+    if system == "Windows":
+        os.startfile(str(file_path))
+    elif system == "Darwin":
+        subprocess.run(["open", str(file_path)], check=False)
+    else:
+        subprocess.run(["xdg-open", str(file_path)], check=False)
+    return {"opened": source}
 
 
 @router.post("/sync")
