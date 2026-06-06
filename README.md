@@ -1,63 +1,101 @@
-# OH-MY-NEURO
+<div align="center">
 
-Local-first RAG workspace for your private document vault
+<h1>OH-MY-NEURO</h1>
 
-내 문서, 위키, 법률/웹 근거를 하나의 답변으로 연결합니다.
+<h3>Local-first RAG workspace for private knowledge</h3>
 
-![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111111)
-![LangGraph](https://img.shields.io/badge/LangGraph-1.x-1C3C3C)
-![OpenAI](https://img.shields.io/badge/OpenAI-API-412991?logo=openai&logoColor=white)
-![Chroma](https://img.shields.io/badge/Chroma-local%20vector%20store-FC5A50)
-![uv](https://img.shields.io/badge/uv-package%20manager-654FF0)
-![Ruff](https://img.shields.io/badge/Ruff-lint-261230)
+<p><em>Ask your vault. Get cited answers.</em></p>
 
-[Features](#features) • [Architecture](#architecture) • [Tech Stack](#tech-stack) • [Quick Start](#quick-start) • [Usage](#usage) • [Configuration](#configuration) • [Project Structure](#project-structure) • [Development](#development)
+<p>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white">
+  <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind%20CSS-3.4-06B6D4?logo=tailwindcss&logoColor=white">
+  <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-1.x-1C3C3C">
+  <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-API-412991?logo=openai&logoColor=white">
+  <img alt="Chroma" src="https://img.shields.io/badge/Chroma-local%20vectors-FC5A50">
+  <img alt="MCP" src="https://img.shields.io/badge/MCP-ready-111827">
+  <img alt="Package uv" src="https://img.shields.io/badge/Package-uv-654FF0">
+  <img alt="Code Style Ruff" src="https://img.shields.io/badge/Code%20Style-Ruff-D7FF64">
+</p>
 
-> OH-MY-NEURO는 Vault 디렉토리의 PDF, DOCX, Markdown, 텍스트 파일을 로컬 Chroma 인덱스로 동기화하고, LangGraph 기반 Corrective RAG로 질문을 재작성·검색·검증·답변합니다. 필요하면 생성된 Vault Wiki와 MCP 법률/웹검색 서버까지 함께 조회해 출처가 있는 답변을 만듭니다.
+<p>
+  <a href="#features">Features</a> •
+  <a href="#architecture">Architecture</a> •
+  <a href="#tech-stack">Tech Stack</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#usage">Usage</a> •
+  <a href="#configuration">Configuration</a> •
+  <a href="#development">Development</a>
+</p>
+
+</div>
+
+---
+
+> **OH-MY-NEURO** turns a private Vault into a local RAG command center. It delta-indexes documents, builds a generated Wiki, routes questions through LangGraph, and blends local/Wiki/MCP evidence into cited answers.
 
 ## Features
 
-| Feature | Description |
-| --- | --- |
-| Vault Delta Sync | 파일 추가·수정·삭제를 감지해 변경분만 인덱싱합니다. |
-| Corrective RAG | 질문 재작성, 검색, 관련도 필터링, 재시도, 컨텍스트 구성, 답변 생성을 LangGraph로 오케스트레이션합니다. |
-| Generated Vault Wiki | Vault 문서를 요약한 `_omn_wiki` 페이지, Easy Index, 지식 그래프, Wiki 전용 벡터 인덱스를 제공합니다. |
-| MCP Routing | 법률 질문은 `korean_law`, 최신/오늘/웹 질문은 `web_search` MCP 서버로 라우팅합니다. |
-| Streaming Chat | FastAPI NDJSON 스트리밍과 React UI에서 토큰 단위 답변, 출처, 웹검색 상태를 표시합니다. |
-| PDF-Aware Ingestion | PyMuPDF 기반 파서를 우선 사용하고 실패 시 `pypdf`로 폴백합니다. Tesseract OCR은 선택 기능입니다. |
-| Local Vector Store | 원문 문서와 Wiki 인덱스를 ChromaDB 컬렉션으로 로컬 저장합니다. |
-| CLI + UI | `oh-my-neuro` 명령어와 FastAPI/React UI를 모두 지원합니다. |
+| | Feature | Description |
+| --- | --- | --- |
+| ⚡ | Delta Vault Sync | 파일 추가·수정·삭제를 감지해 변경분만 Chroma에 반영합니다. |
+| 🧭 | Corrective RAG | 질문 재작성, 검색, 관련도 필터링, 재시도, 답변 생성을 LangGraph 상태 그래프로 실행합니다. |
+| 🧠 | Generated Wiki | Vault 문서를 `_omn_wiki`로 구조화하고 Easy Index, 지식 그래프, Wiki 전용 검색을 제공합니다. |
+| 🔌 | MCP Routing | 법률 질문은 `korean_law`, 최신/오늘/웹 질문은 `web_search` MCP 서버로 조건부 라우팅합니다. |
+| 🌊 | Streaming Chat | FastAPI NDJSON 스트리밍으로 토큰, 출처, 웹검색 상태를 UI와 CLI에 전달합니다. |
+| 📄 | PDF-Aware Ingestion | PyMuPDF 우선 파싱, `pypdf` 폴백, 선택적 Tesseract OCR을 지원합니다. |
+| 🧩 | Local Vector Store | 원문 문서와 Wiki를 분리된 Chroma 컬렉션으로 로컬 저장합니다. |
+| 🖥️ | CLI + Vite UI | `oh-my-neuro` 명령어와 FastAPI-hosted Vite UI를 모두 지원합니다. |
 
 ## Architecture
 
 ```text
-Vault Directory
-  ├─ PDF / DOCX / TXT / MD
-  │
-  ▼
-scan_vault ──► delta planner ──► loaders ──► chunk_pages ──► embeddings ──► Chroma
-                   │                 │                              │
-                   │                 ├─ PyMuPDF / pypdf              ├─ raw document index
-                   │                 ├─ python-docx                  └─ wiki document index
-                   │                 └─ markdown / text
-                   │
-                   └─ deleted sources ──► index cleanup
++------------------+      +-------------------+      +-------------------+
+| Vault directory  | ---> | Delta planner     | ---> | Document loaders  |
+| PDF / DOCX / MD  |      | add/update/delete |      | PyMuPDF / pypdf   |
+| TXT / Markdown   |      | hash + mtime      |      | docx / md / text  |
++------------------+      +-------------------+      +---------+---------+
+                                                               |
+                                                               v
+                                                     +-------------------+
+                                                     | Chunk + embed     |
+                                                     | source metadata   |
+                                                     +---------+---------+
+                                                               |
+                                                               v
+                                                     +-------------------+
+                                                     | Chroma collections|
+                                                     | raw docs + wiki   |
+                                                     +-------------------+
 
-Question
-  │
-  ▼
-prepare_query ──► retrieve(raw + wiki) ──► grade ──► rewrite?
-                                                      │
-                                                      ▼
-                                                route by intent
-                                                ├─ local context
-                                                ├─ MCP law search
-                                                └─ MCP web search
-                                                      │
-                                                      ▼
-                                             prepare_context ──► OpenAI LLM ──► Answer + citations
++------------+    +---------------+    +----------------+    +-----------+
+| Question   | -> | prepare_query | -> | retrieve       | -> | grade     |
+| + history  |    | rewrite seed  |    | raw + wiki     |    | relevance |
++------------+    +---------------+    +-------+--------+    +-----+-----+
+                                            ^                    |
+                                            |                    | weak/no docs
+                                            +--- rewrite <-------+
+                                                                 |
+                                                                 | grounded or max rewrite
+                                                                 v
+                                                        +------------------+
+                                                        | route by intent  |
+                                                        | local / law / web|
+                                                        +--------+---------+
+                                                                 |
+                                                                 v
+                                                        +------------------+
+                                                        | prepare_context  |
+                                                        | docs + wiki + MCP|
+                                                        +--------+---------+
+                                                                 |
+                                                                 v
+                                                        +------------------+
+                                                        | OpenAI answer    |
+                                                        | with citations   |
+                                                        +------------------+
 ```
 
 모든 검색 결과는 `Citation`으로 렌더링되며, Wiki 근거, 원문 문서 근거, MCP 법률/웹검색 근거가 하나의 컨텍스트 블록으로 합쳐집니다.
@@ -67,7 +105,7 @@ prepare_query ──► retrieve(raw + wiki) ──► grade ──► rewrite?
 | Layer | Technology | Purpose |
 | --- | --- | --- |
 | API | FastAPI + Uvicorn | REST/streaming API, SPA hosting |
-| UI | React 19 + Vite + TypeScript | Chat, Vault, Wiki, Settings 화면 |
+| UI | Vite + TypeScript + Tailwind CSS | Chat, Vault, Wiki, Settings 화면 |
 | Orchestration | LangGraph | Corrective RAG 상태 그래프 |
 | LLM | OpenAI via `langchain-openai` | 답변 생성, 질문 재작성, 선택적 관련도 판정 |
 | Embeddings | `text-embedding-3-large` | 문서/Wiki 벡터화 |
@@ -177,7 +215,7 @@ oh-my-neuro clear --force
 Usage: oh-my-neuro [--config APP_YAML] <COMMAND>
 
 Commands:
-  ui                 FastAPI/React UI 실행 (기본)
+  ui                 FastAPI/Vite UI 실행 (기본)
   vault <path>       Vault 경로 설정
   sync [--dry-run]   Vault 델타 동기화
   status             Vault, sync, index 상태 요약
@@ -276,7 +314,7 @@ omn/
 ├── frontend/
 │   └── src/
 │       ├── components/         # shared UI and Wiki visualizations
-│       ├── hooks/              # React hooks
+│       ├── hooks/              # UI hooks
 │       ├── lib/                # API client and utilities
 │       └── pages/              # Chat, Vault, Wiki, Settings, onboarding
 │
@@ -286,7 +324,7 @@ omn/
 ├── tests/                      # pytest test suite
 ├── docs/                       # local PDF specs
 ├── pyproject.toml              # Python package, scripts, pytest, Ruff
-├── frontend/package.json       # Vite/React scripts and dependencies
+├── frontend/package.json       # Vite scripts and dependencies
 └── .env.example                # local environment template
 ```
 
