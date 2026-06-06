@@ -216,6 +216,18 @@ export async function getBootstrap(): Promise<Bootstrap> {
   return request("/api/bootstrap");
 }
 
+export type VaultValidation = {
+  valid: boolean;
+  resolved_path: string;
+  doc_count: number;
+  extensions: string[];
+  error: string;
+};
+
+export async function validateVaultPath(path: string): Promise<VaultValidation> {
+  return request(`/api/vault/validate?path=${encodeURIComponent(path)}`);
+}
+
 export async function setVaultPath(path: string): Promise<VaultStatus> {
   return request("/api/vault", {
     method: "POST",

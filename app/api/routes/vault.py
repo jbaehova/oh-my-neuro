@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import effective_config, iter_ndjson
-from app.api.schemas import IndexedFilesResponse, VaultPathRequest, VaultStatusResponse
+from app.api.schemas import IndexedFilesResponse, VaultPathRequest, VaultStatusResponse, VaultValidateResponse
 from app.ingestion.pipeline import index_vault_delta, list_indexed_sources
 from app.rag.service import reset_service
 from app.storage.chroma_store import reset_vector_store
@@ -42,6 +42,35 @@ def status() -> VaultStatusResponse:
         indexed_files=indexed_files,
         api_key_configured=cfg.has_api_key(),
         wiki=WikiService(cfg).status().model_dump(mode="json"),
+    )
+
+
+@router.get("/validate", response_model=VaultValidateResponse)
+def validate_vault(path: str) -> VaultValidateResponse:
+    """경로 존재 여부와 지원 문서 수를 확인합니다 (상태 변경 없음)."""
+    from app.vault.scanner import scan_vault
+
+    stripped = path.strip()
+    if not stripped:
+        return VaultValidateResponse(valid=False, error="경로를 입력해 주세요.")
+    target = Path(stripped).expanduser().resolve()
+    if not target.exists():
+        return VaultValidateResponse(valid=False, resolved_path=str(target), error="존재하지 않는 경로입니다.")
+    if not target.is_dir():
+        return VaultValidateResponse(valid=False, resolved_path=str(target), error="디렉토리가 아닙니다.")
+
+    cfg = effective_config()
+    entries, _ = scan_vault(target, cfg.vault)
+    ext_counts: dict[str, int] = {}
+    for entry in entries:
+        ext = Path(entry.relative_path).suffix.lower()
+        ext_counts[ext] = ext_counts.get(ext, 0) + 1
+
+    return VaultValidateResponse(
+        valid=True,
+        resolved_path=str(target),
+        doc_count=len(entries),
+        extensions=list(ext_counts.keys()),
     )
 
 
