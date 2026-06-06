@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { AlertCircle, BookOpen, Copy, Loader2, Send, StopCircle, X } from "lucide-react";
+import { AlertCircle, BookOpen, Copy, Globe, Loader2, Send, StopCircle, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,9 @@ type RichMessage = ChatMessage & {
   raw_count?: number;
   wiki_count?: number;
   used_mcp?: boolean;
+  used_web_search?: boolean;
+  web_search_requested?: boolean;
+  web_search_error?: string;
   isError?: boolean;
 };
 
@@ -23,6 +26,9 @@ type TopicContext = {
   page: string;
   summary: string;
 };
+
+const WEB_SEARCH_KEY = "omn:web-search";
+const WEB_SEARCH_TOUCHED_KEY = "omn:web-search:touched";
 
 export function ChatPage() {
   const navigate = useNavigate();
@@ -34,6 +40,10 @@ export function ChatPage() {
   const [topic, setTopic] = useState<TopicContext | null>(null);
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [webSearch, setWebSearch] = useState(() => {
+    if (window.localStorage.getItem(WEB_SEARCH_TOUCHED_KEY) !== "true") return true;
+    return window.localStorage.getItem(WEB_SEARCH_KEY) !== "false";
+  });
   const cancelRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -79,6 +89,10 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, running]);
 
+  useEffect(() => {
+    window.localStorage.setItem(WEB_SEARCH_KEY, webSearch ? "true" : "false");
+  }, [webSearch]);
+
   const history = useMemo(
     () => messages.filter((m) => m.role === "user" || m.role === "assistant").map(({ role, content }) => ({ role, content })),
     [messages],
@@ -101,9 +115,12 @@ export function ChatPage() {
     let rawCount = 0;
     let wikiCount = 0;
     let usedMcp = false;
+    let usedWebSearch = false;
+    let webSearchRequested = false;
+    let webSearchError = "";
     let isError = false;
     try {
-      for await (const chunk of streamChat(requestQuestion, history)) {
+      for await (const chunk of streamChat(requestQuestion, history, webSearch)) {
         if (cancelRef.current) break;
         if (chunk.kind === "meta") {
           citations = chunk.citations || [];
@@ -111,6 +128,9 @@ export function ChatPage() {
           rawCount = chunk.raw_count || 0;
           wikiCount = chunk.wiki_count || 0;
           usedMcp = Boolean(chunk.used_mcp);
+          usedWebSearch = Boolean(chunk.used_web_search);
+          webSearchRequested = Boolean(chunk.web_search_requested);
+          webSearchError = chunk.web_search_error || "";
         } else if (chunk.kind === "token") {
           answer += chunk.text || "";
           setMessages((current) => replaceLastAssistant(current, { content: answer }));
@@ -132,7 +152,18 @@ export function ChatPage() {
     } finally {
       const finalMessages = replaceLastAssistant(
         nextMessages.map((m) => ({ ...m })),
-        { content: answer, citations, retrieval_count: retrievalCount, raw_count: rawCount, wiki_count: wikiCount, used_mcp: usedMcp, isError },
+        {
+          content: answer,
+          citations,
+          retrieval_count: retrievalCount,
+          raw_count: rawCount,
+          wiki_count: wikiCount,
+          used_mcp: usedMcp,
+          used_web_search: usedWebSearch,
+          web_search_requested: webSearchRequested,
+          web_search_error: webSearchError,
+          isError,
+        },
       );
       setMessages((current) => {
         const merged = replaceLastAssistant(current, {
@@ -142,6 +173,9 @@ export function ChatPage() {
           raw_count: rawCount,
           wiki_count: wikiCount,
           used_mcp: usedMcp,
+          used_web_search: usedWebSearch,
+          web_search_requested: webSearchRequested,
+          web_search_error: webSearchError,
           isError,
         });
         sessions.save(sessionId, merged);
@@ -203,7 +237,7 @@ export function ChatPage() {
         )}
 
         {messages.map((message, index) => (
-          <MessageBubble key={`${index}-${message.role}`} message={message} onOpenWiki={(pageId) => navigate(`/wiki?page=${encodeURIComponent(pageId)}`)} />
+          <MessageBubble key={`${index}-${message.role}`} message={message} />
         ))}
         {running && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -235,6 +269,19 @@ export function ChatPage() {
           </div>
         ) : null}
         <div className="surface mx-auto flex max-w-4xl items-end gap-2 rounded-lg p-2">
+          <Button
+            type="button"
+            variant={webSearch ? "secondary" : "outline"}
+            className="mb-0.5 shrink-0"
+            onClick={() => {
+              window.localStorage.setItem(WEB_SEARCH_TOUCHED_KEY, "true");
+              setWebSearch((value) => !value);
+            }}
+            title="MCP 웹검색 도구를 사용해 최신 웹 결과를 답변 근거에 포함합니다."
+          >
+            <Globe className="size-4" />
+            <span className="hidden sm:inline">{webSearch ? "웹검색 ON" : "웹검색 OFF"}</span>
+          </Button>
           <Textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
@@ -269,7 +316,7 @@ function withTopicContext(question: string, topic: TopicContext) {
     .join("\n");
 }
 
-function MessageBubble({ message, onOpenWiki }: { message: RichMessage; onOpenWiki: (pageId: string) => void }) {
+function MessageBubble({ message }: { message: RichMessage }) {
   const isUser = message.role === "user";
 
   return (
@@ -305,44 +352,51 @@ function MessageBubble({ message, onOpenWiki }: { message: RichMessage; onOpenWi
               <Badge variant="outline">{message.raw_count} raw</Badge>
             )}
             {message.used_mcp && <Badge variant="warning">MCP</Badge>}
+            {message.used_web_search && <Badge variant="secondary">Web</Badge>}
+            {!message.used_web_search && message.web_search_requested && (
+              <Badge variant="warning" title={message.web_search_error || "웹검색 결과가 없습니다."}>
+                Web 결과 없음
+              </Badge>
+            )}
             {message.citations?.map((citation, index) => (
-              citation.kind === "wiki" ? (
-                <button
-                  key={`${citation.source}-${index}`}
-                  type="button"
-                  onClick={() => onOpenWiki(citation.source)}
-                  className="max-w-full truncate"
-                >
-                  <Badge variant="secondary" className="cursor-pointer hover:bg-secondary/80">
-                    {index + 1}. Wiki: {citation.source}
-                    {citation.page ? ` p.${citation.page}` : ""}
-                  </Badge>
-                </button>
-              ) : (
-                <button
-                  key={`${citation.source}-${index}`}
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await openFile(citation.source);
-                    } catch {
-                      // ignore - 파일 열기에 실패해도 사용자가 직접 찾아볼 수 있도록 링크는 유지
-                    }
-                  }}
-                  className="max-w-full truncate"
-                >
-                  <Badge variant="outline" className="cursor-pointer hover:bg-secondary/80">
-                    {index + 1}. {citation.source}
-                    {citation.page ? ` p.${citation.page}` : ""}
-                  </Badge>
-                </button>
-              )
+              <button
+                key={`${citation.source}-${index}`}
+                type="button"
+                onClick={() => void openCitation(citation)}
+                className="max-w-full truncate"
+                title={citation.kind === "web" || citation.kind === "mcp" ? citation.location || citation.source : "로컬 원본 파일 열기"}
+              >
+                <Badge variant={citation.kind === "web" ? "secondary" : "outline"} className="cursor-pointer hover:bg-secondary/80">
+                  {index + 1}. {citationLabel(citation)}
+                  {citation.page ? ` p.${citation.page}` : ""}
+                </Badge>
+              </button>
             ))}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+async function openCitation(citation: Citation) {
+  if ((citation.kind === "web" || citation.kind === "mcp") && citation.location?.startsWith("http")) {
+    window.open(citation.location, "_blank", "noreferrer");
+    return;
+  }
+  if (citation.kind === "web" || citation.kind === "mcp") return;
+  try {
+    await openFile(citation.source);
+  } catch (error) {
+    console.error("Failed to open citation", error);
+  }
+}
+
+function citationLabel(citation: Citation) {
+  if (citation.kind === "web") return `Web: ${citation.source}`;
+  if (citation.kind === "mcp") return `MCP: ${citation.source}`;
+  if (citation.kind === "wiki") return `파일: ${citation.source}`;
+  return citation.source;
 }
 
 function replaceLastAssistant(messages: RichMessage[], patch: Partial<RichMessage>) {

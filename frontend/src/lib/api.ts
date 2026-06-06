@@ -3,7 +3,7 @@ export type Citation = {
   location?: string;
   page?: number | null;
   doc_type?: string | null;
-  kind?: "document" | "mcp" | "wiki";
+  kind?: "document" | "mcp" | "wiki" | "web";
   snippet?: string | null;
 };
 
@@ -20,6 +20,9 @@ export type ChatResponse = {
   retrieval_count: number;
   wiki_count?: number;
   raw_count?: number;
+  used_web_search?: boolean;
+  web_search_requested?: boolean;
+  web_search_error?: string;
 };
 
 export type ChatChunk = {
@@ -31,6 +34,9 @@ export type ChatChunk = {
   retrieval_count?: number;
   wiki_count?: number;
   raw_count?: number;
+  used_web_search?: boolean;
+  web_search_requested?: boolean;
+  web_search_error?: string;
 };
 
 export type Bootstrap = {
@@ -87,11 +93,42 @@ export type Settings = {
   api_key_configured: boolean;
 };
 
+export type McpServer = {
+  name: string;
+  transport: "stdio" | "http" | "streamable_http" | "sse" | "websocket" | string;
+  command?: string | null;
+  args: string[];
+  env: Record<string, string>;
+  url?: string | null;
+  headers: Record<string, string>;
+  cwd?: string | null;
+  timeout?: number | null;
+  sse_read_timeout?: number | null;
+  terminate_on_close?: boolean | null;
+  enabled: boolean;
+};
+
+export type McpStatus = {
+  enabled: boolean;
+  available: boolean;
+  error?: string | null;
+  connection_checked?: boolean;
+  tools: string[];
+  web_search_configured?: boolean;
+  web_search_available?: boolean;
+  web_search_tool?: string;
+  servers: string[];
+  enabled_servers: string[];
+  server: string;
+};
+
 export type WikiStatus = {
   enabled: boolean;
   configured: boolean;
   path: string;
   page_count: number;
+  generated_page_count?: number;
+  document_count?: number;
   indexed_chunks: number;
   source_count: number;
   last_built_at?: string | null;
@@ -135,6 +172,7 @@ export type WikiGraphNode = {
   label: string;
   kind: "concept" | "source" | "page";
   page_id: string;
+  source_path?: string;
 };
 
 export type WikiGraphEdge = {
@@ -146,6 +184,32 @@ export type WikiGraphEdge = {
 export type WikiGraph = {
   nodes: WikiGraphNode[];
   edges: WikiGraphEdge[];
+};
+
+export type WikiEasyIndexMatch = {
+  kind: "wiki" | "document";
+  page_id: string;
+  page_title: string;
+  source: string;
+  snippet: string;
+  score: number;
+};
+
+export type WikiEasyIndexResult = {
+  source: string;
+  title: string;
+  doc_type: string;
+  score: number;
+  excerpt: string;
+  concepts: string[];
+  matches: WikiEasyIndexMatch[];
+};
+
+export type WikiEasyIndexResponse = {
+  query: string;
+  semantic_available: boolean;
+  error?: string;
+  results: WikiEasyIndexResult[];
 };
 
 export async function getBootstrap(): Promise<Bootstrap> {
@@ -177,6 +241,38 @@ export async function patchSettings(payload: Record<string, unknown>): Promise<S
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export async function getMcpStatus(connect = false): Promise<McpStatus> {
+  return request(`/api/settings/mcp/status${connect ? "?connect=true" : ""}`);
+}
+
+export async function getMcpServers(): Promise<McpServer[]> {
+  const response = await request<{ servers: McpServer[] }>("/api/settings/mcp/servers");
+  return response.servers;
+}
+
+export async function createMcpServer(server: McpServer): Promise<McpServer[]> {
+  const response = await request<{ servers: McpServer[] }>("/api/settings/mcp/servers", {
+    method: "POST",
+    body: JSON.stringify(server),
+  });
+  return response.servers;
+}
+
+export async function updateMcpServer(name: string, server: McpServer): Promise<McpServer[]> {
+  const response = await request<{ servers: McpServer[] }>(`/api/settings/mcp/servers/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify(server),
+  });
+  return response.servers;
+}
+
+export async function deleteMcpServer(name: string): Promise<McpServer[]> {
+  const response = await request<{ servers: McpServer[] }>(`/api/settings/mcp/servers/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  return response.servers;
 }
 
 export async function setApiKey(apiKey: string): Promise<Settings> {
@@ -218,14 +314,18 @@ export async function getWikiGraph(): Promise<WikiGraph> {
   return request("/api/wiki/graph");
 }
 
+export async function easyIndexWiki(q: string, limit = 8): Promise<WikiEasyIndexResponse> {
+  return request(`/api/wiki/easy-index?q=${encodeURIComponent(q.trim())}&limit=${limit}`);
+}
+
 export async function openFile(source: string): Promise<void> {
   await request(`/api/vault/files/open?source=${encodeURIComponent(source)}`);
 }
 
-export async function* streamChat(question: string, history: ChatMessage[]): AsyncGenerator<ChatChunk> {
+export async function* streamChat(question: string, history: ChatMessage[], webSearch = true): AsyncGenerator<ChatChunk> {
   yield* requestStream<ChatChunk>("/api/chat/stream", {
     method: "POST",
-    body: JSON.stringify({ question, history }),
+    body: JSON.stringify({ question, history, web_search: webSearch }),
   });
 }
 

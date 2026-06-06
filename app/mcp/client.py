@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 from typing import Any
 
 from app.common.logging import get_logger
 from app.common.models import MCPResult
-from app.config import AppConfig, MCPConfig, get_config, load_mcp_config
+from app.config import AppConfig, MCPConfig, get_config, load_user_mcp_config
 
 log = get_logger(__name__)
+
+_WEB_RESULT_RE = re.compile(
+    r"^\s*\d+\.\s+(?P<title>.+?)\n\s*URL:\s*(?P<url>\S+)\n\s*Summary:\s*(?P<summary>.*?)(?=\n\s*\d+\.|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
 
 
 def _run_async(coro):
@@ -90,6 +96,28 @@ def _normalize_tool_output(raw: Any) -> list[MCPResult]:
     return results
 
 
+def _split_formatted_web_results(results: list[MCPResult]) -> list[MCPResult]:
+    out: list[MCPResult] = []
+    for item in results:
+        matches = list(_WEB_RESULT_RE.finditer(item.content or ""))
+        if not matches:
+            out.append(item)
+            continue
+        for match in matches:
+            summary = " ".join(match.group("summary").split())
+            out.append(
+                MCPResult(
+                    tool=item.tool,
+                    title=match.group("title").strip(),
+                    url=match.group("url").strip(),
+                    content=summary,
+                    kind="web",
+                    metadata=item.metadata,
+                )
+            )
+    return out
+
+
 class MCPClient:
     """langchain-mcp-adapters를 래핑한 간단한 클라이언트."""
 
@@ -97,16 +125,21 @@ class MCPClient:
         self._cfg = cfg
         self._mcp_config: MCPConfig | None = None
         self._client = None
+        self._clients: list[Any] = []
         self._tools: list[Any] | None = None
         self._lock = threading.Lock()
         self._attempted = False
         self._error: str | None = None
+        self._last_web_error: str = ""
 
     # --- lifecycle ---------------------------------------------------------
     def _load_mcp_config(self) -> MCPConfig:
         if self._mcp_config is None:
             try:
-                self._mcp_config = load_mcp_config(self._cfg.mcp.config_path_abs)
+                self._mcp_config = load_user_mcp_config(
+                    self._cfg.mcp.config_path_abs,
+                    self._cfg.mcp.user_config_path_abs,
+                )
             except Exception as e:  # pragma: no cover
                 log.warning("MCP 설정 로드 실패: %s", e)
                 self._mcp_config = MCPConfig()
@@ -144,24 +177,56 @@ class MCPClient:
                     tool_name_prefix=self._cfg.mcp.tool_name_prefix,
                 )
                 self._tools = _run_async(self._client.get_tools())
+                self._clients = [self._client]
                 self._error = None
                 log.info("MCP 도구 로드: %d개", len(self._tools or []))
             except Exception as e:
-                log.warning("MCP 초기화 실패: %s", e)
-                self._error = f"MCP 서버 연결 실패: {e}"
-                self._client = None
-                self._tools = None
+                log.warning("MCP 일괄 초기화 실패, 서버별 재시도: %s", e)
+                tools: list[Any] = []
+                clients: list[Any] = []
+                failures: list[str] = []
+                for name, server_spec in spec.items():
+                    try:
+                        client = MultiServerMCPClient(
+                            {name: server_spec},
+                            tool_name_prefix=self._cfg.mcp.tool_name_prefix,
+                        )
+                        server_tools = _run_async(client.get_tools())
+                    except Exception as server_exc:
+                        log.warning("MCP 서버 초기화 실패(%s): %s", name, server_exc)
+                        failures.append(f"{name}: {server_exc}")
+                        continue
+                    clients.append(client)
+                    tools.extend(server_tools)
+                self._clients = clients
+                self._client = clients[0] if clients else None
+                self._tools = tools or None
+                if tools:
+                    self._error = "일부 MCP 서버 연결 실패: " + "; ".join(failures) if failures else None
+                    log.info("MCP 도구 부분 로드: %d개", len(tools))
+                else:
+                    self._error = f"MCP 서버 연결 실패: {e}"
 
     # --- public API --------------------------------------------------------
-    def status(self) -> dict[str, Any]:
-        self._initialize()
+    def status(self, *, connect: bool = True) -> dict[str, Any]:
+        if connect:
+            self._initialize()
         tools = [getattr(t, "name", "?") for t in (self._tools or [])]
         mcp_cfg = self._load_mcp_config()
+        web_tool = self._pick_web_tool()
+        web_search_configured = any(
+            _looks_like_web_server(name, server)
+            for name, server in mcp_cfg.enabled_servers().items()
+        )
         return {
             "enabled": self._cfg.mcp.enabled,
             "available": self._tools is not None and bool(self._tools),
             "error": self._error,
+            "connection_checked": self._attempted,
             "tools": tools,
+            "web_search_configured": web_search_configured,
+            "web_search_available": web_tool is not None,
+            "web_search_tool": getattr(web_tool, "name", "") if web_tool is not None else "",
             "servers": list(mcp_cfg.servers.keys()),
             "enabled_servers": list(mcp_cfg.enabled_servers().keys()),
             "server": self._cfg.mcp.law_server,
@@ -200,7 +265,48 @@ class MCPClient:
                 or "precedent" in name
             ):
                 return tool
-        return self._tools[0] if self._tools else None
+        return None
+
+    def _pick_web_tool(self):
+        if not self._tools:
+            return None
+        preferred_parts = (
+            "web_search",
+            "search_web",
+            "internet_search",
+            "brave",
+            "tavily",
+            "duckduckgo",
+            "google",
+            "bing",
+            "perplexity",
+            "serp",
+        )
+        excluded_parts = ("law", "statute", "precedent", "법", "판례", "조항")
+        candidates: list[tuple[int, Any]] = []
+        for tool in self._tools:
+            name = getattr(tool, "name", "").lower()
+            if any(part in name for part in excluded_parts):
+                continue
+            score = 0
+            if name in ("search", "web_search_search", "duckduckgo_search"):
+                score += 100
+            if name.endswith("_search") or name.endswith(".search"):
+                score += 90
+            if "search_web" in name:
+                score += 80
+            if any(part in name for part in preferred_parts):
+                score += 60
+            if "search" in name:
+                score += 40
+            if any(part in name for part in ("fetch", "content", "page", "read")):
+                score -= 50
+            if score > 0:
+                candidates.append((score, tool))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
 
     def search_law(self, query: str) -> list[MCPResult]:
         self._initialize()
@@ -224,6 +330,71 @@ class MCPClient:
         for item in normalized:
             item.tool = tool_name
         return normalized[:5]
+
+    def search_web(self, query: str) -> list[MCPResult]:
+        self._last_web_error = ""
+        self._initialize()
+        if not self.is_available():
+            self._last_web_error = self._error or "MCP 도구를 사용할 수 없습니다."
+            return []
+        tool = self._pick_web_tool()
+        if tool is None:
+            self._last_web_error = "웹검색 MCP 도구를 찾을 수 없습니다."
+            return []
+        result = None
+        payloads = (
+            {"query": query, "max_results": 5, "region": "kr-kr"},
+            {"query": query, "max_results": 5},
+            {"query": query},
+            {"q": query},
+            {"search": query},
+        )
+        for payload in payloads:
+            try:
+                result = _run_async(tool.ainvoke(payload))
+                break
+            except Exception as e:
+                log.debug("MCP web 도구 호출 실패(%s): %s", sorted(payload), e)
+                self._last_web_error = str(e)
+        if result is None:
+            if not self._last_web_error:
+                self._last_web_error = "웹검색 MCP 도구 호출에 실패했습니다."
+            return []
+        normalized = _normalize_tool_output(result)
+        tool_name = getattr(tool, "name", "mcp_web")
+        for item in normalized:
+            item.tool = tool_name
+            item.kind = "web"
+        split = _split_formatted_web_results(normalized)[:5]
+        if not split:
+            self._last_web_error = "웹검색 결과가 없습니다."
+        return split
+
+    def last_web_error(self) -> str:
+        return self._last_web_error
+
+
+def _looks_like_web_server(name: str, server: Any) -> bool:
+    haystack = " ".join(
+        [
+            name,
+            str(getattr(server, "command", "") or ""),
+            " ".join(str(arg) for arg in (getattr(server, "args", []) or [])),
+        ]
+    ).lower()
+    return any(
+        marker in haystack
+        for marker in (
+            "web",
+            "search",
+            "duckduckgo",
+            "brave",
+            "tavily",
+            "google",
+            "bing",
+            "serp",
+        )
+    )
 
 
 _DEFAULT_CLIENT: MCPClient | None = None

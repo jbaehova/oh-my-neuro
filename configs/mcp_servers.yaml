@@ -3,6 +3,16 @@ servers:
     transport: stdio
     command: uvx
     args:
-      - mcp-server-korean-law
-    env: {}
+      - korean-law-mcp
+    env:
+      OPEN_LAW_ID: $OPEN_LAW_ID
+    enabled: true
+  web_search:
+    transport: stdio
+    command: uvx
+    args:
+      - duckduckgo-mcp-server
+    env:
+      DDG_REGION: kr-kr
+      DDG_SAFE_SEARCH: moderate
     enabled: true

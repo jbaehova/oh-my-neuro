@@ -30,6 +30,7 @@ class BootstrapResponse(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     history: list[ChatMessage] = Field(default_factory=list)
+    web_search: bool = True
 
 
 class ChatResponseDTO(BaseModel):
@@ -40,6 +41,9 @@ class ChatResponseDTO(BaseModel):
     retrieval_count: int = 0
     wiki_count: int = 0
     raw_count: int = 0
+    used_web_search: bool = False
+    web_search_requested: bool = False
+    web_search_error: str = ""
 
 
 class VaultPathRequest(BaseModel):
@@ -86,10 +90,30 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsPatch(BaseModel):
+    llm: dict[str, Any] | None = None
     retrieval: dict[str, Any] | None = None
     wiki: dict[str, Any] | None = None
     mcp: dict[str, Any] | None = None
     ui: dict[str, Any] | None = None
+
+
+class MCPServerDTO(BaseModel):
+    name: str
+    transport: str = "stdio"
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    cwd: str | None = None
+    timeout: float | None = None
+    sse_read_timeout: float | None = None
+    terminate_on_close: bool | None = None
+    enabled: bool = True
+
+
+class MCPServersResponse(BaseModel):
+    servers: list[MCPServerDTO] = Field(default_factory=list)
 
 
 class ApiKeyRequest(BaseModel):

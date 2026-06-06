@@ -121,6 +121,7 @@ class RAGService:
         self,
         question: str,
         history: Iterable[ChatMessage] | list[dict[str, Any]] | None = None,
+        web_search: bool = True,
     ) -> ChatResponse:
         q = (question or "").strip()
         if not q:
@@ -149,7 +150,7 @@ class RAGService:
             return ChatResponse(answer=answer or "...", citations=[], retrieval_count=0)
 
         store = self._ensure_store()
-        if store.count() == 0:
+        if store.count() == 0 and not web_search:
             return ChatResponse(
                 answer=(
                     "Vault가 비어 있거나 아직 동기화되지 않았습니다. Vault 페이지에서 SYNC를 실행해 주세요."
@@ -162,7 +163,7 @@ class RAGService:
             log.exception("RAG 그래프 초기화 실패")
             return ChatResponse(answer=f"시스템 초기화에 실패했습니다: {e}")
 
-        state = _initial_state(q, coerced_history)
+        state = _initial_state(q, coerced_history, web_search=web_search)
         timeout = max(10, self._cfg.llm.request_timeout + 30)
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -189,12 +190,16 @@ class RAGService:
             retrieval_count=len(graded) + len(wiki),
             raw_count=len(graded),
             wiki_count=len(wiki),
+            used_web_search=bool(result.get("used_web_search")),
+            web_search_requested=bool(result.get("web_search_requested")),
+            web_search_error=str(result.get("web_search_error") or ""),
         )
 
     def ask_stream(
         self,
         question: str,
         history: Iterable[ChatMessage] | list[dict[str, Any]] | None = None,
+        web_search: bool = True,
     ) -> Iterator[ChatResponseChunk]:
         """스트리밍 답변. meta → token* → done 청크를 순서대로 yield."""
         q = (question or "").strip()
@@ -229,6 +234,7 @@ class RAGService:
                 kind="meta",
                 citations=[],
                 used_mcp=False,
+                used_web_search=False,
                 rewritten_question=None,
                 retrieval_count=0,
             )
@@ -243,7 +249,7 @@ class RAGService:
             return
 
         store = self._ensure_store()
-        if store.count() == 0:
+        if store.count() == 0 and not web_search:
             yield ChatResponseChunk(kind="meta")
             yield ChatResponseChunk(
                 kind="done",
@@ -262,7 +268,7 @@ class RAGService:
             yield ChatResponseChunk(kind="done")
             return
 
-        state = _initial_state(q, coerced_history)
+        state = _initial_state(q, coerced_history, web_search=web_search)
         timeout = max(10, self._cfg.llm.request_timeout + 30)
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -285,6 +291,9 @@ class RAGService:
 
         citations: list[Citation] = list(prepared.get("citations") or [])
         used_mcp = bool(prepared.get("used_mcp"))
+        used_web_search = bool(prepared.get("used_web_search"))
+        web_search_requested = bool(prepared.get("web_search_requested"))
+        web_search_error = str(prepared.get("web_search_error") or "")
         rewritten = prepared.get("rewritten_question")
         retrieval_count = len(prepared.get("graded_docs") or [])
         wiki_count = len(prepared.get("graded_wiki_docs") or [])
@@ -296,6 +305,9 @@ class RAGService:
             kind="meta",
             citations=citations,
             used_mcp=used_mcp,
+            used_web_search=used_web_search,
+            web_search_requested=web_search_requested,
+            web_search_error=web_search_error,
             rewritten_question=rewritten,
             retrieval_count=retrieval_count,
             raw_count=raw_count,
@@ -320,7 +332,7 @@ class RAGService:
         yield ChatResponseChunk(kind="done")
 
 
-def _initial_state(question: str, history: Any) -> dict:
+def _initial_state(question: str, history: Any, *, web_search: bool = False) -> dict:
     return {
         "question": question,
         "rewritten_question": None,
@@ -330,7 +342,12 @@ def _initial_state(question: str, history: Any) -> dict:
         "graded_docs": [],
         "graded_wiki_docs": [],
         "mcp_results": [],
+        "web_results": [],
         "used_mcp": False,
+        "used_web_search": False,
+        "web_search_enabled": web_search,
+        "web_search_requested": False,
+        "web_search_error": "",
         "rewrites": 0,
     }
 

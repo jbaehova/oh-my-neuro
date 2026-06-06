@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import Any
 
@@ -12,13 +13,15 @@ from app.api.schemas import (
     ApiKeyRequest,
     ClearRequest,
     ClearResponse,
+    MCPServerDTO,
+    MCPServersResponse,
     SettingsPatch,
     SettingsResponse,
 )
-from app.config import get_config
+from app.config import MCPConfig, MCPServerSpec, get_config, load_user_mcp_config, save_mcp_config
 from app.config.loader import PROJECT_ROOT
 from app.ingestion.pipeline import clear_all
-from app.mcp.client import reset_mcp_client
+from app.mcp.client import get_mcp_client, reset_mcp_client
 from app.rag.service import reset_service
 from app.storage.chroma_store import reset_vector_store
 
@@ -44,6 +47,8 @@ def get_settings() -> SettingsResponse:
 @router.patch("/settings", response_model=SettingsResponse)
 def patch_settings(payload: SettingsPatch) -> SettingsResponse:
     cfg = get_config()
+    if payload.llm:
+        _apply_known(cfg.llm, payload.llm)
     if payload.retrieval:
         _apply_known(cfg.retrieval, payload.retrieval)
     if payload.wiki:
@@ -55,6 +60,60 @@ def patch_settings(payload: SettingsPatch) -> SettingsResponse:
         _apply_known(cfg.ui, payload.ui)
     reset_service()
     return get_settings()
+
+
+@router.get("/settings/mcp/status")
+def get_mcp_status(connect: bool = False) -> dict[str, Any]:
+    cfg = effective_config()
+    return get_mcp_client(cfg).status(connect=connect)
+
+
+@router.get("/settings/mcp/servers", response_model=MCPServersResponse)
+def list_mcp_servers() -> MCPServersResponse:
+    cfg = get_config()
+    mcp_cfg = load_user_mcp_config(cfg.mcp.config_path_abs, cfg.mcp.user_config_path_abs)
+    return MCPServersResponse(
+        servers=[MCPServerDTO(**server.model_dump(mode="json")) for server in mcp_cfg.servers.values()]
+    )
+
+
+@router.post("/settings/mcp/servers", response_model=MCPServersResponse)
+def create_mcp_server(payload: MCPServerDTO) -> MCPServersResponse:
+    cfg = get_config()
+    mcp_cfg = load_user_mcp_config(cfg.mcp.config_path_abs, cfg.mcp.user_config_path_abs)
+    server = _validate_mcp_server(payload)
+    if server.name in mcp_cfg.servers:
+        raise HTTPException(status_code=409, detail=f"이미 존재하는 MCP 서버입니다: {server.name}")
+    mcp_cfg.servers[server.name] = server
+    _save_mcp_servers(mcp_cfg)
+    return list_mcp_servers()
+
+
+@router.put("/settings/mcp/servers/{name}", response_model=MCPServersResponse)
+def update_mcp_server(name: str, payload: MCPServerDTO) -> MCPServersResponse:
+    cfg = get_config()
+    mcp_cfg = load_user_mcp_config(cfg.mcp.config_path_abs, cfg.mcp.user_config_path_abs)
+    if name not in mcp_cfg.servers:
+        raise HTTPException(status_code=404, detail=f"MCP 서버를 찾을 수 없습니다: {name}")
+    server = _validate_mcp_server(payload)
+    if server.name != name and server.name in mcp_cfg.servers:
+        raise HTTPException(status_code=409, detail=f"이미 존재하는 MCP 서버입니다: {server.name}")
+    if server.name != name:
+        mcp_cfg.servers.pop(name, None)
+    mcp_cfg.servers[server.name] = server
+    _save_mcp_servers(mcp_cfg)
+    return list_mcp_servers()
+
+
+@router.delete("/settings/mcp/servers/{name}", response_model=MCPServersResponse)
+def delete_mcp_server(name: str) -> MCPServersResponse:
+    cfg = get_config()
+    mcp_cfg = load_user_mcp_config(cfg.mcp.config_path_abs, cfg.mcp.user_config_path_abs)
+    if name not in mcp_cfg.servers:
+        raise HTTPException(status_code=404, detail=f"MCP 서버를 찾을 수 없습니다: {name}")
+    mcp_cfg.servers.pop(name, None)
+    _save_mcp_servers(mcp_cfg)
+    return list_mcp_servers()
 
 
 @router.post("/settings/api-key", response_model=SettingsResponse)
@@ -101,10 +160,8 @@ def _upsert_env_var(name: str, value: str) -> None:
     else:
         content = line + "\n"
     env_path.write_text(content, encoding="utf-8")
-    try:
+    with contextlib.suppress(OSError):
         env_path.chmod(0o600)
-    except OSError:
-        pass
 
 
 @router.post("/index/clear", response_model=ClearResponse)
@@ -123,3 +180,22 @@ def _apply_known(section: Any, values: dict[str, Any]) -> None:
         if not hasattr(section, key):
             raise HTTPException(status_code=400, detail=f"알 수 없는 설정입니다: {key}")
         setattr(section, key, value)
+
+
+def _validate_mcp_server(payload: MCPServerDTO) -> MCPServerSpec:
+    try:
+        server = MCPServerSpec(**payload.model_dump(mode="json"))
+        server.to_adapter_spec()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return server
+
+
+def _save_mcp_servers(config: MCPConfig) -> None:
+    cfg = get_config()
+    try:
+        save_mcp_config(config, cfg.mcp.user_config_path_abs)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"MCP 설정 저장에 실패했습니다: {e}") from e
+    reset_mcp_client()
+    reset_service()

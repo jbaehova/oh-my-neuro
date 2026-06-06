@@ -29,6 +29,7 @@ class LLMClient(Protocol):
 class MCPBridge(Protocol):
     def is_available(self) -> bool: ...
     def search_law(self, query: str) -> list[MCPResult]: ...
+    def search_web(self, query: str) -> list[MCPResult]: ...
 
 
 @dataclass(slots=True)
@@ -49,7 +50,12 @@ class RAGState(TypedDict, total=False):
     graded_docs: list[RetrievedChunk]
     graded_wiki_docs: list[RetrievedChunk]
     mcp_results: list[MCPResult]
+    web_results: list[MCPResult]
     used_mcp: bool
+    used_web_search: bool
+    web_search_enabled: bool
+    web_search_requested: bool
+    web_search_error: str
     rewrites: int
     answer: str
     citations: list[Citation]
@@ -90,6 +96,26 @@ _LAW_FOLLOW_UP_MARKERS = (
     "위 항",
 )
 
+_WEB_TRIGGER_PHRASES = (
+    "웹",
+    "인터넷",
+    "검색",
+    "구글",
+    "뉴스",
+    "기사",
+    "오늘",
+    "현재",
+    "최신",
+    "최근",
+    "실시간",
+    "방금",
+    "발표",
+    "공개",
+    "릴리즈",
+    "업데이트",
+    "동향",
+)
+
 
 def _is_law_question(
     question: str,
@@ -123,10 +149,25 @@ def _is_law_follow_up(question: str) -> bool:
     return bool(re.search(r"(제\s*)?\d+\s*(조|항)", text))
 
 
+def _should_search_web(state: RAGState) -> bool:
+    if not state.get("web_search_enabled"):
+        return False
+    q = state.get("rewritten_question") or state["question"]
+    lowered = q.lower()
+    compact = "".join(lowered.split())
+    if any(marker.replace(" ", "") in compact for marker in _WEB_TRIGGER_PHRASES):
+        return True
+    docs = state.get("graded_docs") or []
+    wiki_docs = state.get("graded_wiki_docs") or []
+    mcp_results = state.get("mcp_results") or []
+    return not docs and not wiki_docs and not mcp_results
+
+
 def _render_context(
     wiki_docs: list[RetrievedChunk],
     docs: list[RetrievedChunk],
     mcp_results: list[MCPResult],
+    web_results: list[MCPResult],
 ) -> tuple[str, list[Citation]]:
     lines: list[str] = []
     citations: list[Citation] = []
@@ -145,6 +186,12 @@ def _render_context(
         cit = mcp.as_citation()
         citations.append(cit)
         body = mcp.content or mcp.title or ""
+        lines.append(f"[{idx}] 출처: {cit.render()}\n{body}")
+        idx += 1
+    for web in web_results:
+        cit = web.as_citation()
+        citations.append(cit)
+        body = web.content or web.title or ""
         lines.append(f"[{idx}] 출처: {cit.render()}\n{body}")
         idx += 1
     return "\n\n".join(lines), citations
@@ -171,6 +218,7 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
     fetch_k = cfg.retrieval.fetch_k
     max_rewrites = cfg.retrieval.max_rewrites
     threshold = cfg.retrieval.relevance_threshold
+    use_llm_grader = cfg.retrieval.use_llm_grader
 
     def prepare_query_node(state: RAGState) -> RAGState:
         question = state["question"]
@@ -203,26 +251,24 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
         docs = state.get("retrieved_docs") or []
         wiki_docs = state.get("wiki_docs") or []
         question = state.get("rewritten_question") or state["question"]
+        graded = _grade_docs(question, docs, "raw")
+        graded_wiki = _grade_docs(question, wiki_docs, "wiki")
+        log.info("grade: %d / %d raw, %d / %d wiki kept", len(graded), len(docs), len(graded_wiki), len(wiki_docs))
+        return {"graded_docs": graded, "graded_wiki_docs": graded_wiki}
+
+    def _grade_docs(question: str, docs: list[RetrievedChunk], label: str) -> list[RetrievedChunk]:
+        if not use_llm_grader:
+            return [doc for doc in docs if doc.score >= threshold]
         graded: list[RetrievedChunk] = []
         for doc in docs:
             try:
                 ok = deps.llm.grade(question, doc.content)
             except Exception as e:
-                log.warning("grader 실패, score로 대체: %s", e)
+                log.warning("%s grader 실패, score로 대체: %s", label, e)
                 ok = doc.score >= threshold
             if ok:
                 graded.append(doc)
-        graded_wiki: list[RetrievedChunk] = []
-        for doc in wiki_docs:
-            try:
-                ok = deps.llm.grade(question, doc.content)
-            except Exception as e:
-                log.warning("wiki grader 실패, score로 대체: %s", e)
-                ok = doc.score >= threshold
-            if ok:
-                graded_wiki.append(doc)
-        log.info("grade: %d / %d raw, %d / %d wiki kept", len(graded), len(docs), len(graded_wiki), len(wiki_docs))
-        return {"graded_docs": graded, "graded_wiki_docs": graded_wiki}
+        return graded
 
     def should_rewrite(state: RAGState) -> str:
         graded = state.get("graded_docs") or []
@@ -249,12 +295,22 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
     def route_node(state: RAGState) -> RAGState:
         q = state.get("rewritten_question") or state["question"]
         history = state.get("chat_history") or []
-        if deps.mcp and _is_law_question(q, cfg, history, state["question"]) and deps.mcp.is_available():
+        web_enabled = bool(state.get("web_search_enabled"))
+        should_use_law = _is_law_question(q, cfg, history, state["question"])
+        should_use_web = web_enabled and _should_search_web(state)
+        if not deps.mcp or not (should_use_law or should_use_web) or not deps.mcp.is_available():
+            return {"route": "prepare_context"}
+        if should_use_law:
             return {"route": "mcp"}
+        if should_use_web:
+            return {"route": "web"}
         return {"route": "prepare_context"}
 
     def route_branch(state: RAGState) -> str:
         return state.get("route") or "prepare_context"
+
+    def after_mcp_branch(state: RAGState) -> str:
+        return "web" if _should_search_web(state) else "prepare_context"
 
     def mcp_node(state: RAGState) -> RAGState:
         q = state.get("rewritten_question") or state["question"]
@@ -265,13 +321,36 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
             results = []
         return {"mcp_results": results, "used_mcp": bool(results)}
 
+    def web_node(state: RAGState) -> RAGState:
+        q = state.get("rewritten_question") or state["question"]
+        error = ""
+        try:
+            results = deps.mcp.search_web(q) if deps.mcp else []
+        except Exception as e:
+            log.warning("MCP 웹검색 호출 실패: %s", e)
+            results = []
+            error = str(e)
+        if not results and deps.mcp is not None and not error:
+            reporter = getattr(deps.mcp, "last_web_error", None)
+            if callable(reporter):
+                error = str(reporter() or "")
+        if not results and not error:
+            error = "웹검색 결과가 없습니다."
+        return {
+            "web_results": results,
+            "used_web_search": bool(results),
+            "web_search_requested": True,
+            "web_search_error": "" if results else error,
+        }
+
     def prepare_context_node(state: RAGState) -> RAGState:
         docs = state.get("graded_docs") or []
         wiki_docs = state.get("graded_wiki_docs") or []
         mcp_results = state.get("mcp_results") or []
-        if not docs and not wiki_docs and not mcp_results:
+        web_results = state.get("web_results") or []
+        if not docs and not wiki_docs and not mcp_results and not web_results:
             return {"context_block": "", "citations": []}
-        context, citations = _render_context(wiki_docs, docs, mcp_results)
+        context, citations = _render_context(wiki_docs, docs, mcp_results, web_results)
         return {"context_block": context, "citations": citations}
 
     def generate_node(state: RAGState) -> RAGState:
@@ -294,6 +373,7 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
     graph.add_node("rewrite", rewrite_node)
     graph.add_node("route", route_node)
     graph.add_node("mcp", mcp_node)
+    graph.add_node("web", web_node)
     graph.add_node("prepare_context", prepare_context_node)
     if terminal == "generate":
         graph.add_node("generate", generate_node)
@@ -306,9 +386,10 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
     graph.add_conditional_edges(
         "route",
         route_branch,
-        {"mcp": "mcp", "prepare_context": "prepare_context"},
+        {"mcp": "mcp", "web": "web", "prepare_context": "prepare_context"},
     )
-    graph.add_edge("mcp", "prepare_context")
+    graph.add_conditional_edges("mcp", after_mcp_branch, {"web": "web", "prepare_context": "prepare_context"})
+    graph.add_edge("web", "prepare_context")
 
     if terminal == "generate":
         graph.add_edge("prepare_context", "generate")
@@ -329,6 +410,7 @@ def describe() -> dict:
             "rewrite",
             "route",
             "mcp",
+            "web",
             "prepare_context",
             "generate",
         ]

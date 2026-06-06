@@ -6,10 +6,11 @@ YAML과 환경 변수를 병합해 Pydantic 모델로 검증된 설정 객체를
 from __future__ import annotations
 
 import os
+import re
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
@@ -53,6 +54,7 @@ class RetrievalSection(BaseModel):
     chunk_overlap: int = 150
     max_rewrites: int = 1
     relevance_threshold: float = 0.5
+    use_llm_grader: bool = False
 
     @field_validator("chunk_overlap")
     @classmethod
@@ -89,6 +91,38 @@ class WikiSection(BaseModel):
         return value
 
 
+class IngestionSection(BaseModel):
+    pdf_backend: Literal["auto", "pypdf", "pdf_monster"] = "auto"
+    pdf_ocr: Literal["auto", "never", "always"] = "auto"
+    pdf_ocr_lang: str = "kor+eng"
+    pdf_ocr_threshold: int = 80
+    pdf_render_dpi: int = 144
+    pdf_max_page_text_chars: int = 20000
+    pdf_visual_review_image_area: int = 10000
+
+    @field_validator("pdf_ocr_lang")
+    @classmethod
+    def _ocr_lang_not_blank(cls, v: str) -> str:
+        value = v.strip()
+        if not value:
+            raise ValueError("ingestion.pdf_ocr_lang must not be blank")
+        return value
+
+    @field_validator("pdf_ocr_threshold", "pdf_max_page_text_chars", "pdf_visual_review_image_area")
+    @classmethod
+    def _non_negative(cls, v: int, info: Any) -> int:
+        if v < 0:
+            raise ValueError(f"ingestion.{info.field_name} must be 0 or greater")
+        return v
+
+    @field_validator("pdf_render_dpi")
+    @classmethod
+    def _positive_dpi(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("ingestion.pdf_render_dpi must be greater than 0")
+        return v
+
+
 class VaultSection(BaseModel):
     path: str = ""
     recursive: bool = True
@@ -119,6 +153,7 @@ class VaultSection(BaseModel):
 class MCPSection(BaseModel):
     enabled: bool = True
     config_path: str = "configs/mcp_servers.yaml"
+    user_config_path: str = "~/.oh-my-neuro/mcp_servers.yaml"
     law_server: str = "korean_law"
     law_keywords: list[str] = Field(default_factory=list)
     tool_name_prefix: bool = True
@@ -126,6 +161,10 @@ class MCPSection(BaseModel):
     @property
     def config_path_abs(self) -> Path:
         return _project_path(self.config_path)
+
+    @property
+    def user_config_path_abs(self) -> Path:
+        return Path(self.user_config_path).expanduser().resolve()
 
 
 def _expand_env(value: str) -> str:
@@ -146,6 +185,7 @@ class AppConfig(BaseModel):
     retrieval: RetrievalSection = Field(default_factory=RetrievalSection)
     storage: StorageSection = Field(default_factory=StorageSection)
     wiki: WikiSection = Field(default_factory=WikiSection)
+    ingestion: IngestionSection = Field(default_factory=IngestionSection)
     vault: VaultSection = Field(default_factory=VaultSection)
     mcp: MCPSection = Field(default_factory=MCPSection)
     ui: UISection = Field(default_factory=UISection)
@@ -179,6 +219,16 @@ class MCPServerSpec(BaseModel):
     sse_read_timeout: float | None = None
     terminate_on_close: bool | None = None
     enabled: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def _safe_name(cls, v: str) -> str:
+        value = v.strip()
+        if not value:
+            raise ValueError("MCP server name must not be blank")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+            raise ValueError("MCP server name may contain only letters, numbers, '.', '_' and '-'")
+        return value
 
     def to_adapter_spec(self) -> dict[str, Any]:
         transport = self.transport.lower().replace("-", "_")
@@ -277,6 +327,33 @@ def load_mcp_config(path: str | Path | None = None) -> MCPConfig:
             continue
         servers[name] = MCPServerSpec(name=name, **spec)
     return MCPConfig(servers=servers)
+
+
+def load_user_mcp_config(
+    base_path: str | Path | None = None,
+    user_path: str | Path | None = None,
+) -> MCPConfig:
+    base = Path(base_path) if base_path else _project_path("configs/mcp_servers.yaml")
+    user = Path(user_path).expanduser() if user_path else Path("~/.oh-my-neuro/mcp_servers.yaml").expanduser()
+    if not user.exists():
+        config = load_mcp_config(base)
+        try:
+            save_mcp_config(config, user)
+        except OSError:
+            return config
+        return config
+    return load_mcp_config(user)
+
+
+def save_mcp_config(config: MCPConfig, path: str | Path | None = None) -> None:
+    p = Path(path) if path else _project_path("configs/mcp_servers.yaml")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    servers: dict[str, dict[str, Any]] = {}
+    for name, spec in sorted(config.servers.items()):
+        data = spec.model_dump(mode="json", exclude={"name"}, exclude_none=True)
+        servers[name] = data
+    with p.open("w", encoding="utf-8") as f:
+        yaml.safe_dump({"servers": servers}, f, allow_unicode=True, sort_keys=False)
 
 
 @lru_cache(maxsize=1)

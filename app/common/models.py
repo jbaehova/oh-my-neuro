@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-SourceKind = Literal["document", "mcp", "wiki"]
+SourceKind = Literal["document", "mcp", "wiki", "web"]
 
 
 class Citation(BaseModel):
@@ -26,7 +26,7 @@ class Citation(BaseModel):
             parts.append(f"p.{self.page}")
         elif self.location:
             parts.append(self.location)
-        labels = {"document": "문서", "mcp": "외부", "wiki": "위키"}
+        labels = {"document": "문서", "mcp": "외부", "wiki": "위키", "web": "웹"}
         label = labels.get(self.kind, "문서")
         return f"[{label}] {' · '.join(parts)}"
 
@@ -87,11 +87,16 @@ class RetrievedChunk(BaseModel):
 
     def as_citation(self) -> Citation:
         kind = str(self.metadata.get("kind") or "document")
-        if kind not in ("document", "mcp", "wiki"):
+        if kind not in ("document", "mcp", "wiki", "web"):
             kind = "document"
+        source = self.source
+        location = self.location
+        if kind == "wiki" and self.metadata.get("original_source"):
+            source = str(self.metadata.get("original_source") or source)
+            location = self.source
         return Citation(
-            source=self.source,
-            location=self.location,
+            source=source,
+            location=location,
             page=self.page,
             doc_type=self.doc_type,
             kind=kind,  # type: ignore[arg-type]
@@ -104,6 +109,7 @@ class MCPResult(BaseModel):
     title: str = ""
     content: str = ""
     url: str | None = None
+    kind: Literal["mcp", "web"] = "mcp"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def as_citation(self) -> Citation:
@@ -112,7 +118,7 @@ class MCPResult(BaseModel):
         return Citation(
             source=source,
             location=location,
-            kind="mcp",
+            kind=self.kind,
             snippet=(self.content[:180] + "…") if len(self.content) > 180 else self.content,
         )
 
@@ -137,6 +143,9 @@ class ChatResponse(BaseModel):
     retrieval_count: int = 0
     wiki_count: int = 0
     raw_count: int = 0
+    used_web_search: bool = False
+    web_search_requested: bool = False
+    web_search_error: str = ""
     extras: dict[str, Any] = Field(default_factory=dict)
 
     def render_with_sources(self) -> str:
@@ -166,6 +175,9 @@ class ChatResponseChunk(BaseModel):
     retrieval_count: int = 0
     wiki_count: int = 0
     raw_count: int = 0
+    used_web_search: bool = False
+    web_search_requested: bool = False
+    web_search_error: str = ""
 
 
 class IndexingDocumentResult(BaseModel):

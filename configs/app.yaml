@@ -6,8 +6,8 @@ app:
 llm:
   provider: openai
   chat_model: gpt-5.4-mini
-  grader_model: gpt-5.4-mini
-  rewriter_model: gpt-5.4-mini
+  grader_model: gpt-5.4-nano
+  rewriter_model: gpt-5.4-nano
   embedding_model: text-embedding-3-large
   temperature: 0.2
   request_timeout: 60
@@ -19,6 +19,7 @@ retrieval:
   chunk_overlap: 150
   max_rewrites: 1
   relevance_threshold: 0.5
+  use_llm_grader: false
 
 storage:
   chroma_path: data/chroma
@@ -32,6 +33,15 @@ wiki:
   collection_name: oh_my_neuro_wiki
   max_source_chars: 12000
 
+ingestion:
+  pdf_backend: auto
+  pdf_ocr: auto
+  pdf_ocr_lang: kor+eng
+  pdf_ocr_threshold: 80
+  pdf_render_dpi: 144
+  pdf_max_page_text_chars: 20000
+  pdf_visual_review_image_area: 10000
+
 vault:
   path: ""
   recursive: true
@@ -40,7 +50,7 @@ vault:
   excluded_dirs: [".git", "node_modules", ".obsidian", "__pycache__", ".venv", "venv", "_omn_wiki"]
 
 mcp:
-  enabled: false
+  enabled: true
   config_path: configs/mcp_servers.yaml
   law_server: korean_law
   tool_name_prefix: true

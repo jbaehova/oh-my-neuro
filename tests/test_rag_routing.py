@@ -71,8 +71,11 @@ class FakeLLM:
 class FakeMCP:
     def __init__(self) -> None:
         self.queries: list[str] = []
+        self.web_queries: list[str] = []
+        self.availability_calls = 0
 
     def is_available(self) -> bool:
+        self.availability_calls += 1
         return True
 
     def search_law(self, query: str) -> list[MCPResult]:
@@ -84,6 +87,27 @@ class FakeMCP:
                 content=f"law result for {query}",
             )
         ]
+
+    def search_web(self, query: str) -> list[MCPResult]:
+        self.web_queries.append(query)
+        return [
+            MCPResult(
+                tool="web_search",
+                title="웹 검색 결과",
+                content=f"web result for {query}",
+                url="https://example.test/search",
+                kind="web",
+            )
+        ]
+
+
+class FakeMCPNoWebResults(FakeMCP):
+    def search_web(self, query: str) -> list[MCPResult]:
+        self.web_queries.append(query)
+        return []
+
+    def last_web_error(self) -> str:
+        return "웹검색 테스트 결과가 없습니다."
 
 
 def _doc(content: str = "Diffusion, GAN, VAE comparison") -> RetrievedChunk:
@@ -188,6 +212,53 @@ def test_law_question_routes_to_mcp_without_explicit_statute_keyword() -> None:
     assert response.used_mcp is True
     assert mcp.queries == [question]
     assert response.citations[0].kind == "mcp"
+
+
+def test_web_search_routes_to_mcp_web_tool_when_enabled() -> None:
+    store = FakeStore()
+    llm = FakeLLM()
+    mcp = FakeMCP()
+    service = _service(store=store, llm=llm, mcp=mcp, mcp_enabled=True, max_rewrites=0)
+    question = "오늘 공개된 AI 검색 동향 알려줘"
+
+    response = service.ask(question, web_search=True)
+
+    assert response.used_web_search is True
+    assert mcp.web_queries == [question]
+    assert response.citations[0].kind == "web"
+    assert llm.generate_questions == [question]
+
+
+def test_default_web_search_skips_web_when_local_docs_are_sufficient() -> None:
+    question = "업로드한 diffusion 문서 비교해줘"
+    store = FakeStore({"diffusion": [_doc()]})
+    llm = FakeLLM()
+    mcp = FakeMCP()
+    service = _service(store=store, llm=llm, mcp=mcp, mcp_enabled=True)
+
+    response = service.ask(question)
+
+    assert response.used_web_search is False
+    assert response.web_search_requested is False
+    assert mcp.availability_calls == 0
+    assert mcp.web_queries == []
+    assert response.retrieval_count == 1
+    assert llm.generate_questions == [question]
+
+
+def test_web_search_request_reports_empty_results_error() -> None:
+    store = FakeStore()
+    llm = FakeLLM()
+    mcp = FakeMCPNoWebResults()
+    service = _service(store=store, llm=llm, mcp=mcp, mcp_enabled=True, max_rewrites=0)
+    question = "오늘 공개된 AI 검색 동향 알려줘"
+
+    response = service.ask(question)
+
+    assert response.used_web_search is False
+    assert response.web_search_requested is True
+    assert response.web_search_error == "웹검색 테스트 결과가 없습니다."
+    assert mcp.web_queries == [question]
 
 
 def test_prior_law_history_does_not_route_unrelated_question_to_mcp() -> None:
