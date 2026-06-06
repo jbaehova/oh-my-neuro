@@ -40,7 +40,11 @@ def _ingest_file(
 ) -> tuple[int, SkippedFile | None]:
     """한 파일을 로드→청크→업서트. 성공 시 (chunks, None), 실패 시 (0, SkippedFile)."""
     try:
-        pages = load_document(entry.absolute_path, relative_path=entry.relative_path)
+        pages = load_document(
+            entry.absolute_path,
+            relative_path=entry.relative_path,
+            ingestion=cfg.ingestion,
+        )
     except Exception as e:
         log.warning("로드 실패 %s: %s", entry.relative_path, e)
         return 0, SkippedFile(path=entry.relative_path, reason="parse_failed")

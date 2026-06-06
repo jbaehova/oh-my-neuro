@@ -63,6 +63,7 @@ def chunk_pages(
             source_slug = _slugify_source(page.source)
             chunk_id = f"{source_slug}::p{page_tag}::c{idx:04d}"
             chunk_extras = dict(base_extras)
+            chunk_extras.update(page.metadata)
             chunk_extras["relative_path"] = page.source
             chunks.append(
                 Chunk(
