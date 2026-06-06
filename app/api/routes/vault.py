@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import queue
+import re
 import subprocess
 import threading
 from collections.abc import Iterator
@@ -70,6 +71,7 @@ def open_file(source: str) -> dict:
     vault_root = cfg.vault.path_abs
     if vault_root is None:
         raise HTTPException(status_code=400, detail="Vault 경로가 설정되어 있지 않습니다.")
+    source = _resolve_wiki_source(vault_root, cfg.wiki.directory, source)
     file_path = (vault_root / source).resolve()
     if not file_path.is_relative_to(vault_root.resolve()):
         raise HTTPException(status_code=403, detail="허용되지 않는 경로입니다.")
@@ -77,12 +79,36 @@ def open_file(source: str) -> dict:
         raise HTTPException(status_code=404, detail=f"파일을 찾을 수 없습니다: {source}")
     system = platform.system()
     if system == "Windows":
-        os.startfile(str(file_path))
+        try:
+            os.startfile(str(file_path))
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"파일 열기에 실패했습니다: {exc}") from exc
     elif system == "Darwin":
-        subprocess.run(["open", str(file_path)], check=False)
+        result = subprocess.run(["open", str(file_path)], check=False)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail="파일 열기에 실패했습니다.")
     else:
-        subprocess.run(["xdg-open", str(file_path)], check=False)
+        result = subprocess.run(["xdg-open", str(file_path)], check=False)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail="파일 열기에 실패했습니다.")
     return {"opened": source}
+
+
+def _resolve_wiki_source(vault_root: Path, wiki_directory: str, source: str) -> str:
+    normalized = source.strip().lstrip("/\\")
+    wiki_name = wiki_directory.strip().strip("/\\")
+    prefix = f"{wiki_name}/"
+    if not normalized.startswith(prefix):
+        return normalized
+    wiki_path = (vault_root / normalized).resolve()
+    if not wiki_path.is_relative_to(vault_root.resolve()) or not wiki_path.exists():
+        return normalized
+    try:
+        text = wiki_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return normalized
+    match = re.search(r"<!--\s*source:\s*(.*?)\s*-->", text)
+    return match.group(1).strip() if match else normalized
 
 
 @router.post("/sync")
