@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { BookOpen, Copy, Loader2, Send, StopCircle, X } from "lucide-react";
+import { AlertCircle, BookOpen, Copy, Loader2, Send, StopCircle, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ type RichMessage = ChatMessage & {
   raw_count?: number;
   wiki_count?: number;
   used_mcp?: boolean;
+  isError?: boolean;
 };
 
 type TopicContext = {
@@ -100,6 +101,7 @@ export function ChatPage() {
     let rawCount = 0;
     let wikiCount = 0;
     let usedMcp = false;
+    let isError = false;
     try {
       for await (const chunk of streamChat(requestQuestion, history)) {
         if (cancelRef.current) break;
@@ -113,8 +115,9 @@ export function ChatPage() {
           answer += chunk.text || "";
           setMessages((current) => replaceLastAssistant(current, { content: answer }));
         } else if (chunk.kind === "error") {
-          answer += `\n\n${chunk.text || "오류가 발생했습니다."}`;
-          setMessages((current) => replaceLastAssistant(current, { content: answer }));
+          answer = answer ? `${answer}\n\n${chunk.text || "오류가 발생했습니다."}` : chunk.text || "오류가 발생했습니다.";
+          isError = true;
+          setMessages((current) => replaceLastAssistant(current, { content: answer, isError: true }));
         } else if (chunk.kind === "done" && chunk.text) {
           answer = chunk.text;
           setMessages((current) => replaceLastAssistant(current, { content: answer }));
@@ -125,10 +128,11 @@ export function ChatPage() {
       }
     } catch (error) {
       answer = error instanceof Error ? error.message : "응답 생성 중 오류가 발생했습니다.";
+      isError = true;
     } finally {
       const finalMessages = replaceLastAssistant(
         nextMessages.map((m) => ({ ...m })),
-        { content: answer, citations, retrieval_count: retrievalCount, raw_count: rawCount, wiki_count: wikiCount, used_mcp: usedMcp },
+        { content: answer, citations, retrieval_count: retrievalCount, raw_count: rawCount, wiki_count: wikiCount, used_mcp: usedMcp, isError },
       );
       setMessages((current) => {
         const merged = replaceLastAssistant(current, {
@@ -138,6 +142,7 @@ export function ChatPage() {
           raw_count: rawCount,
           wiki_count: wikiCount,
           used_mcp: usedMcp,
+          isError,
         });
         sessions.save(sessionId, merged);
         return merged;
@@ -164,9 +169,13 @@ export function ChatPage() {
         <Button
           variant="outline"
           onClick={async () => {
-            await navigator.clipboard.writeText(window.location.href);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            try {
+              await navigator.clipboard.writeText(window.location.href);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            } catch (error) {
+              console.error("Failed to copy link to clipboard", error);
+            }
           }}
         >
           <Copy className="size-4" />
@@ -268,11 +277,16 @@ function MessageBubble({ message, onOpenWiki }: { message: RichMessage; onOpenWi
       <div
         className={cn(
           "max-w-[860px] rounded-lg px-4 py-3 text-sm leading-7",
-          isUser ? "bg-primary text-primary-foreground" : "surface",
+          isUser ? "bg-primary text-primary-foreground" : message.isError ? "border border-red-400 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-700" : "surface",
         )}
       >
         {isUser ? (
           <div className="whitespace-pre-wrap">{message.content}</div>
+        ) : message.isError ? (
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            <span className="whitespace-pre-wrap">{message.content}</span>
+          </div>
         ) : (
           <div className="space-y-2">
             <MarkdownContent content={message.content || "..."} />

@@ -205,7 +205,7 @@ class RAGService:
         if not self._cfg.has_api_key():
             yield ChatResponseChunk(kind="meta")
             yield ChatResponseChunk(
-                kind="done",
+                kind="error",
                 text=(
                     "OPENAI_API_KEY가 설정되어 있지 않습니다. "
                     "Settings에서 OpenAI API 키 설정을 완료하세요."
