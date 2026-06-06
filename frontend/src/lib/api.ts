@@ -179,6 +179,13 @@ export async function patchSettings(payload: Record<string, unknown>): Promise<S
   });
 }
 
+export async function setApiKey(apiKey: string): Promise<Settings> {
+  return request("/api/settings/api-key", {
+    method: "POST",
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+}
+
 export async function clearIndex(): Promise<{ deleted_chunks: number }> {
   return request("/api/index/clear", {
     method: "POST",

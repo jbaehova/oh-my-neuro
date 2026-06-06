@@ -92,6 +92,10 @@ class SettingsPatch(BaseModel):
     ui: dict[str, Any] | None = None
 
 
+class ApiKeyRequest(BaseModel):
+    api_key: str
+
+
 class ClearRequest(BaseModel):
     force: bool = False
 
