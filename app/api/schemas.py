@@ -133,4 +133,5 @@ class VaultValidateResponse(BaseModel):
     resolved_path: str = ""
     doc_count: int = 0
     extensions: list[str] = Field(default_factory=list)
+    truncated: bool = False
     error: str = ""

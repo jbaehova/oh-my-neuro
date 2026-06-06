@@ -8,11 +8,12 @@ import queue
 import re
 import subprocess
 import threading
+from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import effective_config, iter_ndjson
@@ -24,6 +25,10 @@ from app.vault.state import VaultState
 from app.wiki.service import WikiService
 
 router = APIRouter(prefix="/vault", tags=["vault"])
+
+VAULT_BROWSE_REQUEST_HEADER = "oh-my-neuro"
+VAULT_VALIDATION_MAX_DOCUMENTS = 2000
+VAULT_VALIDATION_MAX_DIRECTORIES = 5000
 
 
 @router.get("/status", response_model=VaultStatusResponse)
@@ -45,9 +50,12 @@ def status() -> VaultStatusResponse:
     )
 
 
-@router.get("/browse")
-def browse_folder() -> dict:
+@router.post("/browse", response_model=None)
+def browse_folder(x_requested_with: str = Header(default="")) -> dict | Response:
     """OS 네이티브 폴더 선택 다이얼로그를 열어 선택된 경로를 반환합니다."""
+    if x_requested_with != VAULT_BROWSE_REQUEST_HEADER:
+        raise HTTPException(status_code=403, detail="허용되지 않은 요청입니다.")
+
     system = platform.system()
     selected = ""
 
@@ -78,7 +86,7 @@ def browse_folder() -> dict:
         selected = _tkinter_browse()
 
     if not selected:
-        raise HTTPException(status_code=204, detail="선택 취소됨")
+        return Response(status_code=204)
     return {"path": selected}
 
 
@@ -100,8 +108,6 @@ def _tkinter_browse() -> str:
 @router.get("/validate", response_model=VaultValidateResponse)
 def validate_vault(path: str) -> VaultValidateResponse:
     """경로 존재 여부와 지원 문서 수를 확인합니다 (상태 변경 없음)."""
-    from app.vault.scanner import scan_vault
-
     stripped = path.strip()
     if not stripped:
         return VaultValidateResponse(valid=False, error="경로를 입력해 주세요.")
@@ -112,18 +118,65 @@ def validate_vault(path: str) -> VaultValidateResponse:
         return VaultValidateResponse(valid=False, resolved_path=str(target), error="디렉토리가 아닙니다.")
 
     cfg = effective_config()
-    entries, _ = scan_vault(target, cfg.vault)
-    ext_counts: dict[str, int] = {}
-    for entry in entries:
-        ext = Path(entry.relative_path).suffix.lower()
-        ext_counts[ext] = ext_counts.get(ext, 0) + 1
+    doc_count, extensions, truncated = _scan_vault_validation(target, cfg.vault)
 
     return VaultValidateResponse(
         valid=True,
         resolved_path=str(target),
-        doc_count=len(entries),
-        extensions=list(ext_counts.keys()),
+        doc_count=doc_count,
+        extensions=extensions,
+        truncated=truncated,
     )
+
+
+def _scan_vault_validation(root: Path, cfg: Any) -> tuple[int, list[str], bool]:
+    """Fast path for live UI validation without a full ingest-scale scan."""
+    import os
+
+    exts = {ext.lower() for ext in cfg.include_extensions}
+    max_bytes = cfg.max_file_mb * 1024 * 1024
+    excluded_dirs = set(cfg.excluded_dirs)
+    ext_counts: Counter[str] = Counter()
+    doc_count = 0
+    truncated = False
+
+    def _is_excluded(name: str) -> bool:
+        return name.startswith(".") or name in excluded_dirs
+
+    def _process_file(path: Path) -> bool:
+        nonlocal doc_count
+        ext = path.suffix.lower()
+        if ext not in exts:
+            return False
+        try:
+            if path.stat().st_size > max_bytes:
+                return False
+        except OSError:
+            return False
+        ext_counts[ext] += 1
+        doc_count += 1
+        return doc_count >= VAULT_VALIDATION_MAX_DOCUMENTS
+
+    if cfg.recursive:
+        walk = os.walk(root, followlinks=False)
+        for directories_seen, (dirpath, dirnames, filenames) in enumerate(walk, start=1):
+            if directories_seen > VAULT_VALIDATION_MAX_DIRECTORIES:
+                truncated = True
+                break
+            dirnames[:] = [name for name in dirnames if not _is_excluded(name)]
+            for name in filenames:
+                if _process_file(Path(dirpath) / name):
+                    truncated = True
+                    break
+            if truncated:
+                break
+    else:
+        for item in sorted(root.iterdir()):
+            if item.is_file() and _process_file(item):
+                truncated = True
+                break
+
+    return doc_count, sorted(ext_counts), truncated
 
 
 @router.post("", response_model=VaultStatusResponse)

@@ -221,15 +221,19 @@ export type VaultValidation = {
   resolved_path: string;
   doc_count: number;
   extensions: string[];
+  truncated: boolean;
   error: string;
 };
 
-export async function validateVaultPath(path: string): Promise<VaultValidation> {
-  return request(`/api/vault/validate?path=${encodeURIComponent(path)}`);
+export async function validateVaultPath(path: string, signal?: AbortSignal): Promise<VaultValidation> {
+  return request(`/api/vault/validate?path=${encodeURIComponent(path)}`, { signal });
 }
 
 export async function browseVaultFolder(): Promise<string> {
-  const res = await fetch("/api/vault/browse");
+  const res = await fetch("/api/vault/browse", {
+    method: "POST",
+    headers: { "X-Requested-With": "oh-my-neuro" },
+  });
   if (res.status === 204) return "";
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json() as { path: string };

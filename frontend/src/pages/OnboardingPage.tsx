@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, FolderOpen, Loader2, CheckCircle2, XCircle, FileText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -31,20 +31,28 @@ export function OnboardingPage() {
       return;
     }
 
+    const controller = new AbortController();
     setValidating(true);
+    setValidation(null);
     debounceRef.current = setTimeout(async () => {
       try {
-        const result = await validateVaultPath(vaultPath);
+        const result = await validateVaultPath(vaultPath, controller.signal);
+        if (controller.signal.aborted) return;
         setValidation(result);
-      } catch {
+      } catch (exc) {
+        if (controller.signal.aborted) return;
+        if (exc instanceof DOMException && exc.name === "AbortError") return;
         setValidation(null);
       } finally {
-        setValidating(false);
+        if (!controller.signal.aborted) {
+          setValidating(false);
+        }
       }
     }, DEBOUNCE_MS);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      controller.abort();
     };
   }, [vaultPath]);
 
@@ -119,7 +127,7 @@ export function OnboardingPage() {
     }
   }
 
-  const canStart = !!vaultPath && !running && validation?.valid === true;
+  const canStart = !!vaultPath && !running && validation?.valid !== false;
 
   return (
     <main className="grid min-h-[calc(100vh-2rem)] place-items-center">
@@ -216,7 +224,7 @@ export function OnboardingPage() {
                   <FileText className="mt-0.5 size-4 shrink-0" />
                   <span>
                     이 폴더에서{" "}
-                    <strong>{validation.doc_count}개</strong>의 문서를 찾았습니다.
+                    <strong>{validation.doc_count}{validation.truncated ? "+개" : "개"}</strong>의 문서를 찾았습니다.
                     {validation.extensions.length > 0 && (
                       <span className="ml-1 text-xs opacity-75">
                         ({validation.extensions.join(", ")})

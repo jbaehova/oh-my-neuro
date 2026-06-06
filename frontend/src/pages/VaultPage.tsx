@@ -111,18 +111,28 @@ export function VaultPage() {
     if (pathDebounceRef.current) clearTimeout(pathDebounceRef.current);
     const trimmed = pathDraft.trim();
     if (!trimmed) { setPathValidation(null); setPathValidating(false); return; }
+    const controller = new AbortController();
     setPathValidating(true);
+    setPathValidation(null);
     pathDebounceRef.current = setTimeout(async () => {
       try {
-        const result = await validateVaultPath(trimmed);
+        const result = await validateVaultPath(trimmed, controller.signal);
+        if (controller.signal.aborted) return;
         setPathValidation(result);
-      } catch {
+      } catch (exc) {
+        if (controller.signal.aborted) return;
+        if (exc instanceof DOMException && exc.name === "AbortError") return;
         setPathValidation(null);
       } finally {
-        setPathValidating(false);
+        if (!controller.signal.aborted) {
+          setPathValidating(false);
+        }
       }
     }, 600);
-    return () => { if (pathDebounceRef.current) clearTimeout(pathDebounceRef.current); };
+    return () => {
+      if (pathDebounceRef.current) clearTimeout(pathDebounceRef.current);
+      controller.abort();
+    };
   }, [pathDraft]);
 
   async function browseFolder() {
@@ -241,7 +251,7 @@ export function VaultPage() {
             {browsing ? <RefreshCw className="size-4 animate-spin" /> : <FolderOpen className="size-4" />}
             탐색
           </Button>
-          <Button onClick={() => void saveVaultPath()} disabled={pathSaving || !pathValidation?.valid}>
+          <Button onClick={() => void saveVaultPath()} disabled={pathSaving || !pathDraft.trim() || pathValidation?.valid === false}>
             <Save className="size-4" />
             {pathSaving ? "저장 중" : "경로 저장"}
           </Button>
@@ -254,7 +264,7 @@ export function VaultPage() {
           }`}>
             <FileText className="size-4 shrink-0" />
             {pathValidation.valid
-              ? <>이 폴더에서 <strong className="mx-1">{pathValidation.doc_count}개</strong> 문서를 찾았습니다.
+              ? <>이 폴더에서 <strong className="mx-1">{pathValidation.doc_count}{pathValidation.truncated ? "+개" : "개"}</strong> 문서를 찾았습니다.
                   {pathValidation.extensions.length > 0 && <span className="ml-1 text-xs opacity-75">({pathValidation.extensions.join(", ")})</span>}
                   {pathValidation.doc_count === 0 && <span className="ml-1 text-xs opacity-75">— 지원 형식(PDF, DOCX, TXT, MD)이 없을 수 있습니다.</span>}
                 </>
