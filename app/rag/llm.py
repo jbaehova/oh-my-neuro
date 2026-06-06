@@ -76,15 +76,46 @@ def _retry(func):
     )(func)
 
 
+def _trim_text(text: str, limit: int) -> str:
+    value = (text or "").strip()
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit].rstrip()}..."
+
+
 def _history_block(history: Iterable[ChatMessage], limit: int = 6) -> str:
-    msgs = list(history)[-limit:]
+    msgs = [m for m in list(history) if m.role in ("user", "assistant")][-limit:]
     if not msgs:
         return "(없음)"
     out = []
     for m in msgs:
         role = "사용자" if m.role == "user" else "어시스턴트"
-        out.append(f"{role}: {m.content}")
+        out.append(f"{role}: {_trim_text(m.content, 1200)}")
     return "\n".join(out)
+
+
+def _conversation_messages(
+    history: Iterable[ChatMessage],
+    *,
+    max_messages: int = 12,
+    max_total_chars: int = 10000,
+    max_message_chars: int = 2000,
+) -> list[tuple[str, str]]:
+    """Return recent user/assistant messages inside a bounded prompt budget."""
+    selected: list[tuple[str, str]] = []
+    used = 0
+    for message in reversed([m for m in history if m.role in ("user", "assistant")]):
+        content = _trim_text(message.content, max_message_chars)
+        if not content:
+            continue
+        cost = len(content)
+        if selected and used + cost > max_total_chars:
+            break
+        selected.append((message.role, content))
+        used += cost
+        if len(selected) >= max_messages:
+            break
+    return list(reversed(selected))
 
 
 class OpenAILLM:
@@ -250,9 +281,7 @@ class OpenAILLM:
     def chat(self, question: str, history: list[ChatMessage]) -> str:
         """RAG 우회 — 컨텍스트 없이 LLM 직접 호출 (인사/잡담/메타 질문용)."""
         content: list = [("system", prompts.CHAT_SYSTEM)]
-        for m in (history or [])[-6:]:
-            role = m.role if m.role in ("user", "assistant", "system") else "user"
-            content.append((role, m.content))
+        content.extend(_conversation_messages(history or []))
         content.append(("user", question))
         resp = self._chat.invoke(content)
         return _content_to_text(resp.content).strip()
@@ -260,9 +289,7 @@ class OpenAILLM:
     def chat_stream(self, question: str, history: list[ChatMessage]) -> Iterator[str]:
         """RAG 우회 스트리밍."""
         content: list = [("system", prompts.CHAT_SYSTEM)]
-        for m in (history or [])[-6:]:
-            role = m.role if m.role in ("user", "assistant", "system") else "user"
-            content.append((role, m.content))
+        content.extend(_conversation_messages(history or []))
         content.append(("user", question))
         try:
             stream = self._chat.stream(content)

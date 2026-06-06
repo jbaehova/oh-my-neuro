@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict
@@ -96,24 +97,87 @@ _LAW_FOLLOW_UP_MARKERS = (
     "위 항",
 )
 
-_WEB_TRIGGER_PHRASES = (
+_WEB_EXPLICIT_TRIGGER_PHRASES = (
     "웹",
     "인터넷",
-    "검색",
+    "웹검색",
+    "인터넷 검색",
+    "구글 검색",
     "구글",
     "뉴스",
     "기사",
+)
+
+_WEB_FRESHNESS_TRIGGER_PHRASES = (
     "오늘",
     "현재",
     "최신",
     "최근",
     "실시간",
     "방금",
+)
+
+_WEB_PUBLIC_TRIGGER_PHRASES = (
+    "뉴스",
+    "기사",
     "발표",
     "공개",
     "릴리즈",
     "업데이트",
     "동향",
+)
+
+_FOLLOW_UP_REFERENCE_PHRASES = (
+    "아까",
+    "방금",
+    "이전",
+    "앞서",
+    "위에서",
+    "위 내용",
+    "위 답변",
+    "위 질문",
+    "그거",
+    "그것",
+    "그 내용",
+    "그 문서",
+    "그 질문",
+    "그 답변",
+    "저거",
+    "계속",
+    "이어서",
+    "연결해서",
+    "관련해서",
+    "방금 말한",
+    "전에 말한",
+)
+
+_SHORT_FOLLOW_UP_MARKERS = (
+    "비교",
+    "정리",
+    "요약",
+    "설명",
+    "다시",
+    "더",
+    "추가",
+    "자세히",
+    "예시",
+    "차이",
+    "공통점",
+    "문제점",
+    "리스크",
+)
+
+_STANDALONE_QUERY_MARKERS = (
+    "문서",
+    "파일",
+    "vault",
+    "볼트",
+    "업로드",
+    "pdf",
+    "docx",
+    "txt",
+    "위키",
+    "wiki",
 )
 
 
@@ -152,15 +216,48 @@ def _is_law_follow_up(question: str) -> bool:
 def _should_search_web(state: RAGState) -> bool:
     if not state.get("web_search_enabled"):
         return False
-    q = state.get("rewritten_question") or state["question"]
-    lowered = q.lower()
+    candidates = [state["question"]]
+    rewritten = state.get("rewritten_question")
+    if rewritten:
+        candidates.append(rewritten)
+    return any(_has_web_trigger(q) for q in candidates)
+
+
+def _web_query(state: RAGState) -> str:
+    question = state["question"]
+    rewritten = state.get("rewritten_question")
+    if rewritten and _has_web_trigger(rewritten):
+        return rewritten
+    if _has_web_trigger(question):
+        return question
+    return rewritten or question
+
+
+def _has_web_trigger(question: str) -> bool:
+    lowered = question.lower()
     compact = "".join(lowered.split())
-    if any(marker.replace(" ", "") in compact for marker in _WEB_TRIGGER_PHRASES):
+    has_explicit = any(marker.replace(" ", "") in compact for marker in _WEB_EXPLICIT_TRIGGER_PHRASES)
+    has_freshness = any(marker.replace(" ", "") in compact for marker in _WEB_FRESHNESS_TRIGGER_PHRASES)
+    has_public = any(marker.replace(" ", "") in compact for marker in _WEB_PUBLIC_TRIGGER_PHRASES)
+    return has_explicit or (has_freshness and has_public)
+
+
+def _should_use_history_for_query(question: str, history: list[ChatMessage]) -> bool:
+    """Only let prior turns affect retrieval when the current question is underspecified."""
+    if not history:
+        return False
+    lowered = question.lower()
+    compact = "".join(lowered.split())
+    if any(marker.replace(" ", "") in compact for marker in _FOLLOW_UP_REFERENCE_PHRASES):
         return True
-    docs = state.get("graded_docs") or []
-    wiki_docs = state.get("graded_wiki_docs") or []
-    mcp_results = state.get("mcp_results") or []
-    return not docs and not wiki_docs and not mcp_results
+    if _is_law_follow_up(question):
+        return True
+    if any(marker.replace(" ", "") in compact for marker in _STANDALONE_QUERY_MARKERS):
+        return False
+    tokenish_length = len(re.sub(r"\s+", "", question))
+    if tokenish_length > 28:
+        return False
+    return any(marker.replace(" ", "") in compact for marker in _SHORT_FOLLOW_UP_MARKERS)
 
 
 def _render_context(
@@ -221,9 +318,11 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
     use_llm_grader = cfg.retrieval.use_llm_grader
 
     def prepare_query_node(state: RAGState) -> RAGState:
+        started = time.perf_counter()
         question = state["question"]
         history = state.get("chat_history") or []
-        if not history:
+        if not _should_use_history_for_query(question, history):
+            log.info("rag.stage.prepare_query %.3fs rewrite=skipped", time.perf_counter() - started)
             return {"rewritten_question": None}
         try:
             new_q = deps.llm.rewrite(question, history).strip()
@@ -231,29 +330,59 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
             log.warning("initial rewrite 실패, 원본 유지: %s", e)
             new_q = question
         new_q = new_q or question
-        log.info("prepare_query: %r → %r", question[:60], new_q[:60])
+        log.info(
+            "rag.stage.prepare_query %.3fs rewritten=%s %r -> %r",
+            time.perf_counter() - started,
+            new_q != question,
+            question[:60],
+            new_q[:60],
+        )
         return {"rewritten_question": new_q}
 
     def retrieve_node(state: RAGState) -> RAGState:
+        started = time.perf_counter()
         q = state.get("rewritten_question") or state["question"]
+        raw_started = time.perf_counter()
         docs = deps.retriever.search(q, top_k=top_k, fetch_k=fetch_k)
+        raw_elapsed = time.perf_counter() - raw_started
         wiki_docs: list[RetrievedChunk] = []
+        wiki_elapsed = 0.0
         if deps.wiki_retriever is not None:
             try:
+                wiki_started = time.perf_counter()
                 wiki_docs = deps.wiki_retriever.search(q, top_k=top_k, fetch_k=fetch_k)
+                wiki_elapsed = time.perf_counter() - wiki_started
             except Exception as e:
                 log.warning("wiki retrieve 실패: %s", e)
                 wiki_docs = []
-        log.info("retrieve: %d raw, %d wiki candidates for %r", len(docs), len(wiki_docs), q[:60])
+                wiki_elapsed = time.perf_counter() - wiki_started
+        log.info(
+            "rag.stage.retrieve %.3fs raw=%.3fs wiki=%.3fs raw_count=%d wiki_count=%d query=%r",
+            time.perf_counter() - started,
+            raw_elapsed,
+            wiki_elapsed,
+            len(docs),
+            len(wiki_docs),
+            q[:60],
+        )
         return {"retrieved_docs": docs, "wiki_docs": wiki_docs}
 
     def grade_node(state: RAGState) -> RAGState:
+        started = time.perf_counter()
         docs = state.get("retrieved_docs") or []
         wiki_docs = state.get("wiki_docs") or []
         question = state.get("rewritten_question") or state["question"]
         graded = _grade_docs(question, docs, "raw")
         graded_wiki = _grade_docs(question, wiki_docs, "wiki")
-        log.info("grade: %d / %d raw, %d / %d wiki kept", len(graded), len(docs), len(graded_wiki), len(wiki_docs))
+        log.info(
+            "rag.stage.grade %.3fs raw=%d/%d wiki=%d/%d llm_grader=%s",
+            time.perf_counter() - started,
+            len(graded),
+            len(docs),
+            len(graded_wiki),
+            len(wiki_docs),
+            use_llm_grader,
+        )
         return {"graded_docs": graded, "graded_wiki_docs": graded_wiki}
 
     def _grade_docs(question: str, docs: list[RetrievedChunk], label: str) -> list[RetrievedChunk]:
@@ -281,30 +410,47 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
         return "rewrite"
 
     def rewrite_node(state: RAGState) -> RAGState:
+        started = time.perf_counter()
         question = state.get("rewritten_question") or state["question"]
         history = state.get("chat_history") or []
+        query_history = history if _should_use_history_for_query(state["question"], history) else []
         try:
-            new_q = deps.llm.rewrite(question, history)
+            new_q = deps.llm.rewrite(question, query_history)
         except Exception as e:
             log.warning("rewrite 실패, 원본 유지: %s", e)
             new_q = question
         rewrites = int(state.get("rewrites", 0)) + 1
-        log.info("rewrite(%d): %r → %r", rewrites, question[:60], new_q[:60])
+        log.info(
+            "rag.stage.rewrite %.3fs count=%d %r -> %r",
+            time.perf_counter() - started,
+            rewrites,
+            question[:60],
+            new_q[:60],
+        )
         return {"rewritten_question": new_q, "rewrites": rewrites}
 
     def route_node(state: RAGState) -> RAGState:
+        started = time.perf_counter()
         q = state.get("rewritten_question") or state["question"]
         history = state.get("chat_history") or []
         web_enabled = bool(state.get("web_search_enabled"))
         should_use_law = _is_law_question(q, cfg, history, state["question"])
         should_use_web = web_enabled and _should_search_web(state)
-        if not deps.mcp or not (should_use_law or should_use_web) or not deps.mcp.is_available():
-            return {"route": "prepare_context"}
-        if should_use_law:
-            return {"route": "mcp"}
-        if should_use_web:
-            return {"route": "web"}
-        return {"route": "prepare_context"}
+        route = "prepare_context"
+        mcp_available = False
+        if deps.mcp and (should_use_law or should_use_web):
+            mcp_available = deps.mcp.is_available()
+            if mcp_available:
+                route = "mcp" if should_use_law else "web"
+        log.info(
+            "rag.stage.route %.3fs route=%s law=%s web=%s mcp_available=%s",
+            time.perf_counter() - started,
+            route,
+            should_use_law,
+            should_use_web,
+            mcp_available,
+        )
+        return {"route": route}
 
     def route_branch(state: RAGState) -> str:
         return state.get("route") or "prepare_context"
@@ -313,16 +459,19 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
         return "web" if _should_search_web(state) else "prepare_context"
 
     def mcp_node(state: RAGState) -> RAGState:
+        started = time.perf_counter()
         q = state.get("rewritten_question") or state["question"]
         try:
             results = deps.mcp.search_law(q) if deps.mcp else []
         except Exception as e:
             log.warning("MCP 호출 실패: %s", e)
             results = []
+        log.info("rag.stage.mcp %.3fs results=%d", time.perf_counter() - started, len(results))
         return {"mcp_results": results, "used_mcp": bool(results)}
 
     def web_node(state: RAGState) -> RAGState:
-        q = state.get("rewritten_question") or state["question"]
+        started = time.perf_counter()
+        q = _web_query(state)
         error = ""
         try:
             results = deps.mcp.search_web(q) if deps.mcp else []
@@ -336,6 +485,12 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
                 error = str(reporter() or "")
         if not results and not error:
             error = "웹검색 결과가 없습니다."
+        log.info(
+            "rag.stage.web %.3fs results=%d error=%s",
+            time.perf_counter() - started,
+            len(results),
+            bool(error and not results),
+        )
         return {
             "web_results": results,
             "used_web_search": bool(results),
@@ -344,19 +499,29 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
         }
 
     def prepare_context_node(state: RAGState) -> RAGState:
+        started = time.perf_counter()
         docs = state.get("graded_docs") or []
         wiki_docs = state.get("graded_wiki_docs") or []
         mcp_results = state.get("mcp_results") or []
         web_results = state.get("web_results") or []
         if not docs and not wiki_docs and not mcp_results and not web_results:
+            log.info("rag.stage.prepare_context %.3fs empty=true", time.perf_counter() - started)
             return {"context_block": "", "citations": []}
         context, citations = _render_context(wiki_docs, docs, mcp_results, web_results)
+        log.info(
+            "rag.stage.prepare_context %.3fs chars=%d citations=%d",
+            time.perf_counter() - started,
+            len(context),
+            len(citations),
+        )
         return {"context_block": context, "citations": citations}
 
     def generate_node(state: RAGState) -> RAGState:
+        started = time.perf_counter()
         context = state.get("context_block") or ""
         citations = state.get("citations") or []
         if not context:
+            log.info("rag.stage.generate %.3fs empty=true", time.perf_counter() - started)
             return {"answer": prompts.EMPTY_ANSWER, "citations": []}
         question = state.get("rewritten_question") or state["question"]
         try:
@@ -364,6 +529,11 @@ def build_graph(deps: GraphDeps, terminal: Terminal = "generate"):
         except Exception as e:
             log.exception("generate 실패: %s", e)
             answer = f"답변 생성 중 오류가 발생했습니다: {e}"
+        log.info(
+            "rag.stage.generate %.3fs answer_chars=%d",
+            time.perf_counter() - started,
+            len(answer),
+        )
         return {"answer": answer, "citations": citations}
 
     graph = StateGraph(RAGState)

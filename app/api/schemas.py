@@ -30,7 +30,7 @@ class BootstrapResponse(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     history: list[ChatMessage] = Field(default_factory=list)
-    web_search: bool = True
+    web_search: bool = False
 
 
 class ChatResponseDTO(BaseModel):

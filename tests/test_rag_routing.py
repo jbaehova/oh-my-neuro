@@ -23,6 +23,11 @@ class FakeStore:
         return []
 
 
+class EmptyStore(FakeStore):
+    def count(self) -> int:
+        return 0
+
+
 class ExplodingStore:
     def count(self) -> int:
         raise AssertionError("direct chat should not inspect the vault")
@@ -44,6 +49,8 @@ class FakeLLM:
             return FOLLOW_UP_REWRITE
         if question == "2항도 알려줘":
             return LAW_FOLLOW_UP_REWRITE
+        if question == "오늘 공개된 AI 검색 동향 알려줘":
+            return "AI 검색 동향"
         return question
 
     def grade(self, question: str, document: str) -> bool:
@@ -163,6 +170,43 @@ def test_direct_chat_strips_colon_punctuation() -> None:
     assert llm.chat_questions == ["hi:"]
 
 
+def test_obvious_chat_request_skips_vault_check() -> None:
+    llm = FakeLLM()
+    service = _service(store=ExplodingStore(), llm=llm)
+
+    response = service.ask("농담 하나 해줘")
+
+    assert response.answer == "direct chat"
+    assert response.retrieval_count == 0
+    assert llm.chat_questions == ["농담 하나 해줘"]
+
+
+def test_temporal_small_talk_skips_vault_check() -> None:
+    llm = FakeLLM()
+    service = _service(store=ExplodingStore(), llm=llm)
+
+    response = service.ask("오늘 기분 어때?")
+
+    assert response.answer == "direct chat"
+    assert response.retrieval_count == 0
+    assert llm.chat_questions == ["오늘 기분 어때?"]
+
+
+def test_conversation_meta_request_with_find_word_skips_vault_check() -> None:
+    llm = FakeLLM()
+    service = _service(store=ExplodingStore(), llm=llm)
+    history = [
+        ChatMessage(role="user", content="이 시스템 맥락 관리 문제를 설명해줘"),
+        ChatMessage(role="assistant", content="이전 주제에 과도하게 끌려갈 수 있습니다."),
+    ]
+
+    response = service.ask("이전 답변에서 문제점 찾아줘", history)
+
+    assert response.answer == "direct chat"
+    assert response.retrieval_count == 0
+    assert llm.chat_questions == ["이전 답변에서 문제점 찾아줘"]
+
+
 def test_follow_up_comparison_rewrites_before_first_retrieval() -> None:
     store = FakeStore({"diffusion gan vae": [_doc()]})
     llm = FakeLLM()
@@ -229,14 +273,14 @@ def test_web_search_routes_to_mcp_web_tool_when_enabled() -> None:
     assert llm.generate_questions == [question]
 
 
-def test_default_web_search_skips_web_when_local_docs_are_sufficient() -> None:
+def test_web_search_skips_web_when_local_docs_are_sufficient() -> None:
     question = "업로드한 diffusion 문서 비교해줘"
     store = FakeStore({"diffusion": [_doc()]})
     llm = FakeLLM()
     mcp = FakeMCP()
     service = _service(store=store, llm=llm, mcp=mcp, mcp_enabled=True)
 
-    response = service.ask(question)
+    response = service.ask(question, web_search=True)
 
     assert response.used_web_search is False
     assert response.web_search_requested is False
@@ -246,6 +290,23 @@ def test_default_web_search_skips_web_when_local_docs_are_sufficient() -> None:
     assert llm.generate_questions == [question]
 
 
+def test_web_search_is_opt_in_for_empty_local_results() -> None:
+    store = FakeStore()
+    llm = FakeLLM()
+    mcp = FakeMCP()
+    service = _service(store=store, llm=llm, mcp=mcp, mcp_enabled=True, max_rewrites=0)
+    question = "오늘 공개된 AI 검색 동향 알려줘"
+
+    response = service.ask(question)
+
+    assert response.used_web_search is False
+    assert response.web_search_requested is False
+    assert mcp.availability_calls == 0
+    assert mcp.web_queries == []
+    assert response.retrieval_count == 0
+    assert llm.generate_questions == []
+
+
 def test_web_search_request_reports_empty_results_error() -> None:
     store = FakeStore()
     llm = FakeLLM()
@@ -253,12 +314,27 @@ def test_web_search_request_reports_empty_results_error() -> None:
     service = _service(store=store, llm=llm, mcp=mcp, mcp_enabled=True, max_rewrites=0)
     question = "오늘 공개된 AI 검색 동향 알려줘"
 
-    response = service.ask(question)
+    response = service.ask(question, web_search=True)
 
     assert response.used_web_search is False
     assert response.web_search_requested is True
     assert response.web_search_error == "웹검색 테스트 결과가 없습니다."
     assert mcp.web_queries == [question]
+
+
+def test_web_search_uses_original_question_when_rewrite_drops_freshness_signal() -> None:
+    store = FakeStore()
+    llm = FakeLLM()
+    mcp = FakeMCP()
+    service = _service(store=store, llm=llm, mcp=mcp, mcp_enabled=True, max_rewrites=1)
+    question = "오늘 공개된 AI 검색 동향 알려줘"
+
+    response = service.ask(question, web_search=True)
+
+    assert response.used_web_search is True
+    assert response.web_search_requested is True
+    assert mcp.web_queries == [question]
+    assert response.rewritten_question == "AI 검색 동향"
 
 
 def test_prior_law_history_does_not_route_unrelated_question_to_mcp() -> None:
@@ -278,6 +354,48 @@ def test_prior_law_history_does_not_route_unrelated_question_to_mcp() -> None:
     assert mcp.queries == []
     assert response.retrieval_count == 1
     assert llm.generate_questions == [question]
+    assert llm.rewrite_calls == []
+
+
+def test_empty_rag_context_falls_back_to_direct_chat_for_general_question() -> None:
+    question = "diffusion이 뭐야?"
+    store = FakeStore()
+    llm = FakeLLM()
+    service = _service(store=store, llm=llm, max_rewrites=0)
+
+    response = service.ask(question)
+
+    assert response.answer == "direct chat"
+    assert response.retrieval_count == 0
+    assert llm.chat_questions == [question]
+
+
+def test_empty_vault_with_web_disabled_falls_back_for_general_question() -> None:
+    question = "diffusion이 뭐야?"
+    llm = FakeLLM()
+    service = _service(store=EmptyStore(), llm=llm)
+
+    response = service.ask(question, web_search=False)
+
+    assert response.answer == "direct chat"
+    assert response.retrieval_count == 0
+    assert llm.chat_questions == [question]
+
+
+def test_default_web_search_does_not_run_without_explicit_web_intent() -> None:
+    question = "diffusion이 뭐야?"
+    store = FakeStore()
+    llm = FakeLLM()
+    mcp = FakeMCP()
+    service = _service(store=store, llm=llm, mcp=mcp, mcp_enabled=True, max_rewrites=0)
+
+    response = service.ask(question, web_search=True)
+
+    assert response.answer == "direct chat"
+    assert response.used_web_search is False
+    assert response.web_search_requested is False
+    assert mcp.web_queries == []
+    assert llm.chat_questions == [question]
 
 
 def test_streaming_uses_same_rewritten_question_for_generation() -> None:

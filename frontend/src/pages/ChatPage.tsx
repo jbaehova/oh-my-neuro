@@ -41,7 +41,7 @@ export function ChatPage() {
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
   const [webSearch, setWebSearch] = useState(() => {
-    if (window.localStorage.getItem(WEB_SEARCH_TOUCHED_KEY) !== "true") return true;
+    if (window.localStorage.getItem(WEB_SEARCH_TOUCHED_KEY) !== "true") return false;
     return window.localStorage.getItem(WEB_SEARCH_KEY) !== "false";
   });
   const cancelRef = useRef(false);

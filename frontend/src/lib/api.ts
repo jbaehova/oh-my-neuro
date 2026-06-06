@@ -322,7 +322,7 @@ export async function openFile(source: string): Promise<void> {
   await request(`/api/vault/files/open?source=${encodeURIComponent(source)}`);
 }
 
-export async function* streamChat(question: string, history: ChatMessage[], webSearch = true): AsyncGenerator<ChatChunk> {
+export async function* streamChat(question: string, history: ChatMessage[], webSearch = false): AsyncGenerator<ChatChunk> {
   yield* requestStream<ChatChunk>("/api/chat/stream", {
     method: "POST",
     body: JSON.stringify({ question, history, web_search: webSearch }),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import re
 import threading
+import time
 from collections.abc import Iterable, Iterator
 from typing import Any
 
@@ -42,6 +43,119 @@ _DIRECT_CHAT_PHRASES = frozenset(
         "뭐할수있어",
         "무엇을할수있어",
     }
+)
+
+_MAX_HISTORY_MESSAGES = 40
+_MAX_HISTORY_CONTENT_CHARS = 4000
+
+_DOCUMENT_INTENT_MARKERS = (
+    "문서",
+    "파일",
+    "vault",
+    "볼트",
+    "업로드",
+    "인덱스",
+    "인덱싱",
+    "동기화",
+    "출처",
+    "근거",
+    "인용",
+    "pdf",
+    "docx",
+    "txt",
+    "markdown",
+    "위키",
+    "wiki",
+    "첨부",
+)
+
+_WEB_EXPLICIT_INTENT_MARKERS = (
+    "웹",
+    "인터넷",
+    "웹검색",
+    "인터넷 검색",
+    "구글 검색",
+    "구글",
+    "뉴스",
+    "기사",
+)
+
+_WEB_FRESHNESS_INTENT_MARKERS = (
+    "오늘",
+    "현재",
+    "최신",
+    "최근",
+    "실시간",
+    "방금",
+)
+
+_WEB_PUBLIC_INTENT_MARKERS = (
+    "뉴스",
+    "기사",
+    "발표",
+    "공개",
+    "릴리즈",
+    "업데이트",
+    "동향",
+)
+
+_LAW_INTENT_MARKERS = (
+    "헌법",
+    "형법",
+    "민법",
+    "상법",
+    "법률",
+    "법령",
+    "조항",
+    "판례",
+    "처벌",
+    "범죄",
+    "위반",
+    "저촉",
+    "법적",
+    "어떤 법",
+    "무슨 법",
+)
+
+_CHAT_INTENT_MARKERS = (
+    "농담",
+    "잡담",
+    "수다",
+    "안부",
+    "너는",
+    "너가",
+    "네가",
+    "너의",
+    "너 뭐",
+    "대화",
+    "채팅",
+    "기분",
+    "어때",
+    "방금",
+    "아까",
+    "내 질문",
+    "질문 흐름",
+    "흐름",
+    "이전 질문",
+    "이전 답변",
+    "앞서",
+    "위 답변",
+    "위에서",
+    "내가 물어",
+    "내가 말",
+    "네 답변",
+    "말투",
+    "톤",
+    "번역",
+    "영어로",
+    "한국어로",
+    "문장",
+    "메일",
+    "글 작성",
+    "다듬",
+    "고쳐",
+    "쉽게 설명",
+    "다시 설명",
 )
 
 
@@ -121,7 +235,7 @@ class RAGService:
         self,
         question: str,
         history: Iterable[ChatMessage] | list[dict[str, Any]] | None = None,
-        web_search: bool = True,
+        web_search: bool = False,
     ) -> ChatResponse:
         q = (question or "").strip()
         if not q:
@@ -151,6 +265,13 @@ class RAGService:
 
         store = self._ensure_store()
         if store.count() == 0 and not web_search:
+            if _should_fallback_to_chat(q):
+                try:
+                    answer = llm.chat(q, coerced_history)
+                except Exception as e:
+                    log.exception("빈 Vault 후 일반 대화 폴백 실패")
+                    return ChatResponse(answer=f"응답 생성 중 오류가 발생했습니다: {e}")
+                return ChatResponse(answer=answer or "...", citations=[], retrieval_count=0)
             return ChatResponse(
                 answer=(
                     "Vault가 비어 있거나 아직 동기화되지 않았습니다. Vault 페이지에서 SYNC를 실행해 주세요."
@@ -165,10 +286,12 @@ class RAGService:
 
         state = _initial_state(q, coerced_history, web_search=web_search)
         timeout = max(10, self._cfg.llm.request_timeout + 30)
+        started = time.perf_counter()
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(graph.invoke, state)
                 result = future.result(timeout=timeout)
+                log.info("rag.ask.prepare_and_generate %.3fs", time.perf_counter() - started)
         except concurrent.futures.TimeoutError:
             log.error("RAG 실행 타임아웃 (%ss)", timeout)
             return ChatResponse(
@@ -177,6 +300,15 @@ class RAGService:
         except Exception as e:
             log.exception("RAG 실행 실패")
             return ChatResponse(answer=f"답변 생성 중 오류가 발생했습니다: {e}")
+
+        context_block = result.get("context_block") or ""
+        if not context_block and _should_fallback_to_chat(q):
+            try:
+                answer = llm.chat(q, coerced_history)
+            except Exception as e:
+                log.exception("빈 RAG 컨텍스트 후 일반 대화 폴백 실패")
+                return ChatResponse(answer=f"응답 생성 중 오류가 발생했습니다: {e}")
+            return ChatResponse(answer=answer or "...", citations=[], retrieval_count=0)
 
         answer = result.get("answer") or ""
         citations: list[Citation] = list(result.get("citations") or [])
@@ -199,7 +331,7 @@ class RAGService:
         self,
         question: str,
         history: Iterable[ChatMessage] | list[dict[str, Any]] | None = None,
-        web_search: bool = True,
+        web_search: bool = False,
     ) -> Iterator[ChatResponseChunk]:
         """스트리밍 답변. meta → token* → done 청크를 순서대로 yield."""
         q = (question or "").strip()
@@ -251,6 +383,16 @@ class RAGService:
         store = self._ensure_store()
         if store.count() == 0 and not web_search:
             yield ChatResponseChunk(kind="meta")
+            if _should_fallback_to_chat(q):
+                try:
+                    for piece in llm_for_direct.chat_stream(q, coerced_history):
+                        if piece:
+                            yield ChatResponseChunk(kind="token", text=piece)
+                except Exception as e:
+                    log.exception("빈 Vault 후 일반 대화 스트리밍 폴백 실패")
+                    yield ChatResponseChunk(kind="error", text=f"응답 오류: {e}")
+                yield ChatResponseChunk(kind="done")
+                return
             yield ChatResponseChunk(
                 kind="done",
                 text=(
@@ -270,10 +412,12 @@ class RAGService:
 
         state = _initial_state(q, coerced_history, web_search=web_search)
         timeout = max(10, self._cfg.llm.request_timeout + 30)
+        started = time.perf_counter()
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(graph.invoke, state)
                 prepared = future.result(timeout=timeout)
+                log.info("rag.stream.prepare_context %.3fs", time.perf_counter() - started)
         except concurrent.futures.TimeoutError:
             log.error("RAG ctx 실행 타임아웃 (%ss)", timeout)
             yield ChatResponseChunk(kind="meta")
@@ -317,18 +461,43 @@ class RAGService:
         if not context_block:
             from app.rag import prompts as _prompts
 
+            if _should_fallback_to_chat(q):
+                try:
+                    for piece in llm_for_direct.chat_stream(q, coerced_history):
+                        if piece:
+                            yield ChatResponseChunk(kind="token", text=piece)
+                except Exception as e:
+                    log.exception("빈 RAG 컨텍스트 후 일반 대화 스트리밍 폴백 실패")
+                    yield ChatResponseChunk(kind="error", text=f"응답 오류: {e}")
+                yield ChatResponseChunk(kind="done")
+                return
             yield ChatResponseChunk(kind="done", text=_prompts.EMPTY_ANSWER)
             return
 
         llm = self._ensure_llm()
         generation_question = rewritten or q
+        generation_started = time.perf_counter()
+        first_piece_logged = False
+        pieces = 0
         try:
             for piece in llm.generate_stream(generation_question, context_block):
                 if piece:
+                    if not first_piece_logged:
+                        log.info(
+                            "rag.stream.first_token %.3fs",
+                            time.perf_counter() - generation_started,
+                        )
+                        first_piece_logged = True
+                    pieces += 1
                     yield ChatResponseChunk(kind="token", text=piece)
         except Exception as e:
             log.exception("스트리밍 생성 실패")
             yield ChatResponseChunk(kind="error", text=f"스트리밍 오류: {e}")
+        log.info(
+            "rag.stream.generate %.3fs pieces=%d",
+            time.perf_counter() - generation_started,
+            pieces,
+        )
         yield ChatResponseChunk(kind="done")
 
 
@@ -353,12 +522,43 @@ def _initial_state(question: str, history: Any, *, web_search: bool = False) -> 
 
 
 def _should_answer_directly(question: str) -> bool:
-    return _chat_phrase_key(question) in _DIRECT_CHAT_PHRASES
+    if _chat_phrase_key(question) in _DIRECT_CHAT_PHRASES:
+        return True
+    if _has_retrieval_intent(question):
+        return False
+    return _has_marker(question, _CHAT_INTENT_MARKERS)
+
+
+def _should_fallback_to_chat(question: str) -> bool:
+    return not _has_retrieval_intent(question)
 
 
 def _chat_phrase_key(question: str) -> str:
     lowered = (question or "").strip().lower()
     return re.sub(r"[\s.!?？。~…'\"`,，、:：;；]+", "", lowered)
+
+
+def _has_retrieval_intent(question: str) -> bool:
+    return (
+        _has_marker(question, _DOCUMENT_INTENT_MARKERS)
+        or _has_web_intent(question)
+        or _has_marker(question, _LAW_INTENT_MARKERS)
+    )
+
+
+def _has_web_intent(question: str) -> bool:
+    if _has_marker(question, _WEB_EXPLICIT_INTENT_MARKERS):
+        return True
+    return _has_marker(question, _WEB_FRESHNESS_INTENT_MARKERS) and _has_marker(
+        question,
+        _WEB_PUBLIC_INTENT_MARKERS,
+    )
+
+
+def _has_marker(question: str, markers: tuple[str, ...]) -> bool:
+    lowered = (question or "").lower()
+    compact = "".join(lowered.split())
+    return any(marker.lower() in lowered or marker.lower().replace(" ", "") in compact for marker in markers)
 
 
 def _classify_intent(llm: Any, question: str, history: list[ChatMessage]) -> str:
@@ -400,18 +600,26 @@ def _coerce_history(history: Any) -> list[ChatMessage]:
     out: list[ChatMessage] = []
     for item in history:
         if isinstance(item, ChatMessage):
-            out.append(item)
+            if item.role in ("user", "assistant") and item.content:
+                out.append(ChatMessage(role=item.role, content=_trim_history_content(item.content)))
         elif isinstance(item, dict):
             role = str(item.get("role") or "user")
             content = str(item.get("content") or "")
-            if role not in ("user", "assistant", "system"):
-                role = "user"
+            if role not in ("user", "assistant"):
+                continue
             if content:
-                out.append(ChatMessage(role=role, content=content))
+                out.append(ChatMessage(role=role, content=_trim_history_content(content)))
         elif isinstance(item, tuple) and len(item) == 2:
             user_msg, assistant_msg = item
             if user_msg:
-                out.append(ChatMessage(role="user", content=str(user_msg)))
+                out.append(ChatMessage(role="user", content=_trim_history_content(str(user_msg))))
             if assistant_msg:
-                out.append(ChatMessage(role="assistant", content=str(assistant_msg)))
-    return out
+                out.append(ChatMessage(role="assistant", content=_trim_history_content(str(assistant_msg))))
+    return out[-_MAX_HISTORY_MESSAGES:]
+
+
+def _trim_history_content(content: str) -> str:
+    value = (content or "").strip()
+    if len(value) <= _MAX_HISTORY_CONTENT_CHARS:
+        return value
+    return f"{value[:_MAX_HISTORY_CONTENT_CHARS].rstrip()}..."
