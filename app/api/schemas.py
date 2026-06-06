@@ -126,3 +126,11 @@ class ClearRequest(BaseModel):
 
 class ClearResponse(BaseModel):
     deleted_chunks: int
+
+
+class VaultValidateResponse(BaseModel):
+    valid: bool
+    resolved_path: str = ""
+    doc_count: int = 0
+    extensions: list[str] = Field(default_factory=list)
+    error: str = ""

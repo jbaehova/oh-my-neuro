@@ -216,6 +216,26 @@ export async function getBootstrap(): Promise<Bootstrap> {
   return request("/api/bootstrap");
 }
 
+export type VaultValidation = {
+  valid: boolean;
+  resolved_path: string;
+  doc_count: number;
+  extensions: string[];
+  error: string;
+};
+
+export async function validateVaultPath(path: string): Promise<VaultValidation> {
+  return request(`/api/vault/validate?path=${encodeURIComponent(path)}`);
+}
+
+export async function browseVaultFolder(): Promise<string> {
+  const res = await fetch("/api/vault/browse");
+  if (res.status === 204) return "";
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json() as { path: string };
+  return data.path;
+}
+
 export async function setVaultPath(path: string): Promise<VaultStatus> {
   return request("/api/vault", {
     method: "POST",
