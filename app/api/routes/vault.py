@@ -18,6 +18,8 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import effective_config, iter_ndjson
 from app.api.schemas import IndexedFilesResponse, VaultPathRequest, VaultStatusResponse
 from app.ingestion.pipeline import index_vault_delta, list_indexed_sources
+from app.rag.service import reset_service
+from app.storage.chroma_store import reset_vector_store
 from app.vault.state import VaultState
 from app.wiki.service import WikiService
 
@@ -55,6 +57,7 @@ def set_vault(payload: VaultPathRequest) -> VaultStatusResponse:
     state.vault_path = str(target)
     state.onboarding_completed = True
     state.save()
+    reset_service()
     return status()
 
 
@@ -132,6 +135,8 @@ def sync() -> StreamingResponse:
     def _worker() -> None:
         try:
             result = index_vault_delta(cfg=cfg, progress=_progress)
+            reset_vector_store()
+            reset_service()
             state = VaultState.load()
             if not state.vault_path and cfg.vault.path_abs:
                 state.vault_path = str(cfg.vault.path_abs)

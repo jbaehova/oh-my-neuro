@@ -136,6 +136,7 @@ def set_api_key(payload: ApiKeyRequest) -> SettingsResponse:
     # 2) 즉시 적용 — 프로세스 환경 + 싱글톤 config + 서비스 캐시 갱신
     os.environ["OPENAI_API_KEY"] = key
     get_config().openai_api_key = key
+    reset_vector_store()
     reset_service()
 
     return get_settings()

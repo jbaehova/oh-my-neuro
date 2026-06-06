@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.deps import effective_config, iter_ndjson
 from app.api.schemas import ChatRequest, ChatResponseDTO
-from app.rag.service import RAGService
+from app.rag.service import get_service
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @router.post("", response_model=ChatResponseDTO)
 def ask(payload: ChatRequest) -> ChatResponseDTO:
     cfg = effective_config()
-    response = RAGService(cfg=cfg).ask(payload.question, payload.history, web_search=payload.web_search)
+    response = get_service(cfg).ask(payload.question, payload.history, web_search=payload.web_search)
     return ChatResponseDTO(
         answer=response.answer,
         citations=response.citations,
@@ -37,7 +37,7 @@ def ask_stream(payload: ChatRequest) -> StreamingResponse:
     cfg = effective_config()
 
     def _events() -> Iterator[dict]:
-        service = RAGService(cfg=cfg)
+        service = get_service(cfg)
         for chunk in service.ask_stream(payload.question, payload.history, web_search=payload.web_search):
             yield chunk.model_dump(mode="json")
 
