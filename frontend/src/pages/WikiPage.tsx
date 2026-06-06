@@ -160,6 +160,19 @@ export function WikiPage() {
         <Metric label="위키 청크" value={`${status?.indexed_chunks ?? 0}`} />
       </section>
 
+      <section className="mt-6">
+        <WikiKnowledgeMap
+          graph={graph}
+          selectedPageId={selectedPage}
+          highlightedSources={highlightedSources}
+          onSelectPage={(pageId) => {
+            selectPage(pageId);
+            navigate(`/wiki/detail?page=${encodeURIComponent(pageId)}`);
+          }}
+          onOpenSource={(source) => void openSource(source)}
+        />
+      </section>
+
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-6">
           <form onSubmit={submitSearch} className="surface rounded-lg p-4">
@@ -277,17 +290,6 @@ export function WikiPage() {
         </div>
 
         <aside className="space-y-6">
-          <WikiKnowledgeMap
-            graph={graph}
-            selectedPageId={selectedPage}
-            highlightedSources={highlightedSources}
-            onSelectPage={(pageId) => {
-              selectPage(pageId);
-              navigate(`/wiki/detail?page=${encodeURIComponent(pageId)}`);
-            }}
-            onOpenSource={(source) => void openSource(source)}
-          />
-
           <section className="surface rounded-lg p-4">
             <div className="flex items-center gap-2">
               <FileText className="size-4 text-muted-foreground" />

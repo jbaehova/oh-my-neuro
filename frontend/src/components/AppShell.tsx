@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { BookOpen, Bot, Database, FolderOpen, MessageSquare, Moon, Plus, Settings, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,9 @@ const nav = [
 
 export function AppShell({ bootstrap, dark, setDark }: AppShellProps) {
   const sessions = useSessions();
+  const location = useLocation();
   const navigate = useNavigate();
+  const wideWorkspace = location.pathname.startsWith("/wiki");
 
   function startNewChat() {
     navigate(`/chat?session=${newSessionId()}`);
@@ -106,7 +108,7 @@ export function AppShell({ bootstrap, dark, setDark }: AppShellProps) {
       </aside>
 
       <main className="lg:pl-64">
-        <div className="mx-auto min-h-screen max-w-6xl px-4 py-4 sm:px-6 lg:px-8">
+        <div className={cn("mx-auto min-h-screen px-4 py-4 sm:px-6 lg:px-8", wideWorkspace ? "max-w-none" : "max-w-6xl")}>
           <Outlet />
         </div>
       </main>

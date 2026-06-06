@@ -76,6 +76,25 @@
     scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
   }
 
+  .wiki-graph-shell {
+    border: 1px solid rgb(255 255 255 / 0.09);
+    background: #101113;
+    box-shadow:
+      0 24px 80px rgb(2 6 23 / 0.24),
+      inset 0 1px 0 rgb(255 255 255 / 0.06);
+  }
+
+  .wiki-graph-frame {
+    background: #101113;
+  }
+
+  .wiki-graph-frame .force-graph-container,
+  .wiki-graph-frame canvas {
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
   /* Wiki card-news layout */
   .wiki-card-feed {
     @apply space-y-5;
