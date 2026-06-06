@@ -45,6 +45,58 @@ def status() -> VaultStatusResponse:
     )
 
 
+@router.get("/browse")
+def browse_folder() -> dict:
+    """OS 네이티브 폴더 선택 다이얼로그를 열어 선택된 경로를 반환합니다."""
+    system = platform.system()
+    selected = ""
+
+    if system == "Darwin":
+        result = subprocess.run(
+            ["osascript", "-e", "POSIX path of (choose folder)"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            selected = result.stdout.strip().rstrip("/")
+    elif system == "Linux":
+        for cmd in [
+            ["zenity", "--file-selection", "--directory", "--title=Vault 폴더 선택"],
+            ["kdialog", "--getexistingdirectory", str(Path.home())],
+        ]:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                if result.returncode == 0:
+                    selected = result.stdout.strip()
+                    break
+            except FileNotFoundError:
+                continue
+        else:
+            selected = _tkinter_browse()
+    else:
+        selected = _tkinter_browse()
+
+    if not selected:
+        raise HTTPException(status_code=204, detail="선택 취소됨")
+    return {"path": selected}
+
+
+def _tkinter_browse() -> str:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        path = filedialog.askdirectory(title="Vault 폴더 선택")
+        root.destroy()
+        return path or ""
+    except Exception:
+        return ""
+
+
 @router.get("/validate", response_model=VaultValidateResponse)
 def validate_vault(path: str) -> VaultValidateResponse:
     """경로 존재 여부와 지원 문서 수를 확인합니다 (상태 변경 없음)."""

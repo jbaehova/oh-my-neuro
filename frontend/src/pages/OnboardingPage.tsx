@@ -5,13 +5,14 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { setVaultPath, streamSync, SyncEvent, validateVaultPath, VaultValidation } from "@/lib/api";
+import { setVaultPath, streamSync, SyncEvent, validateVaultPath, VaultValidation, browseVaultFolder } from "@/lib/api";
 
 const DEBOUNCE_MS = 600;
 
 export function OnboardingPage() {
   const [path, setPath] = useState("");
   const [running, setRunning] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
   const [event, setEvent] = useState<SyncEvent | null>(null);
   const [error, setError] = useState("");
   const [validation, setValidation] = useState<VaultValidation | null>(null);
@@ -102,6 +103,22 @@ export function OnboardingPage() {
     }
   }
 
+  async function browse() {
+    if (browsing || running) return;
+    setBrowsing(true);
+    try {
+      const selected = await browseVaultFolder();
+      if (selected) {
+        setPath(selected);
+        setError("");
+      }
+    } catch {
+      // 사용자가 취소하거나 다이얼로그 오류 — 조용히 무시
+    } finally {
+      setBrowsing(false);
+    }
+  }
+
   const canStart = !!vaultPath && !running && validation?.valid === true;
 
   return (
@@ -150,6 +167,21 @@ export function OnboardingPage() {
                 )}
               </div>
             </div>
+
+            <Button
+              variant="outline"
+              onClick={browse}
+              disabled={browsing || running}
+              aria-label="폴더 선택"
+              title="폴더 선택"
+            >
+              {browsing ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <FolderOpen className="size-4" />
+              )}
+              탐색
+            </Button>
 
             <Button
               onClick={start}

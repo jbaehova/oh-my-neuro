@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ExternalLink,
@@ -11,6 +12,7 @@ import {
   Save,
   Search,
   Trash2,
+  XCircle,
 } from "lucide-react";
 
 import { EmptyState } from "@/components/EmptyState";
@@ -20,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import {
+  browseVaultFolder,
   clearIndex,
   getFiles,
   getVaultStatus,
@@ -28,7 +31,9 @@ import {
   setVaultPath,
   streamSync,
   SyncEvent,
+  validateVaultPath,
   VaultStatus,
+  VaultValidation,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +56,10 @@ export function VaultPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncEvent, setSyncEvent] = useState<SyncEvent | null>(null);
   const [pathSaving, setPathSaving] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
+  const [pathValidation, setPathValidation] = useState<VaultValidation | null>(null);
+  const [pathValidating, setPathValidating] = useState(false);
+  const pathDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function load() {
     const [nextStatus, nextFiles] = await Promise.all([getVaultStatus(), getFiles()]);
@@ -97,6 +106,35 @@ export function VaultPage() {
       return filtered[0] ?? null;
     });
   }, [filtered]);
+
+  useEffect(() => {
+    if (pathDebounceRef.current) clearTimeout(pathDebounceRef.current);
+    const trimmed = pathDraft.trim();
+    if (!trimmed) { setPathValidation(null); setPathValidating(false); return; }
+    setPathValidating(true);
+    pathDebounceRef.current = setTimeout(async () => {
+      try {
+        const result = await validateVaultPath(trimmed);
+        setPathValidation(result);
+      } catch {
+        setPathValidation(null);
+      } finally {
+        setPathValidating(false);
+      }
+    }, 600);
+    return () => { if (pathDebounceRef.current) clearTimeout(pathDebounceRef.current); };
+  }, [pathDraft]);
+
+  async function browseFolder() {
+    if (browsing) return;
+    setBrowsing(true);
+    try {
+      const selected = await browseVaultFolder();
+      if (selected) { setPathDraft(selected); setSyncEvent(null); }
+    } catch { /* 취소 */ } finally {
+      setBrowsing(false);
+    }
+  }
 
   const hasVaultPath = Boolean(status?.vault_path?.trim());
   const syncDisabled = syncing || !hasVaultPath;
@@ -174,27 +212,56 @@ export function VaultPage() {
       </section>
 
       <section className="surface mt-5 rounded-lg p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-          <label className="min-w-0 flex-1">
-            <span className="text-sm font-medium">Vault 경로 변경</span>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              로컬 문서가 들어 있는 디렉토리의 절대 경로를 입력하세요. 경로를 바꾼 뒤에는 SYNC를 실행해야 새 문서가 인덱싱됩니다.
-            </p>
+        <span className="text-sm font-medium">Vault 경로 변경</span>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          로컬 문서가 들어 있는 디렉토리의 절대 경로를 입력하거나 탐색 버튼으로 선택하세요. 경로를 바꾼 뒤에는 SYNC를 실행해야 새 문서가 인덱싱됩니다.
+        </p>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <div className="relative flex-1">
             <Input
-              className="mt-2"
               value={pathDraft}
-              onChange={(event) => setPathDraft(event.target.value)}
+              onChange={(event) => { setPathDraft(event.target.value); setSyncEvent(null); }}
               placeholder="/Users/me/Documents/vault"
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void saveVaultPath();
-              }}
+              onKeyDown={(event) => { if (event.key === "Enter") void saveVaultPath(); }}
+              className={
+                pathValidation
+                  ? pathValidation.valid
+                    ? "border-green-500 pr-8 focus-visible:ring-green-500"
+                    : "border-destructive pr-8 focus-visible:ring-destructive"
+                  : "pr-8"
+              }
             />
-          </label>
-          <Button onClick={() => void saveVaultPath()} disabled={pathSaving}>
+            <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
+              {pathValidating && <RefreshCw className="size-4 animate-spin text-muted-foreground" />}
+              {!pathValidating && pathValidation?.valid === true && <CheckCircle2 className="size-4 text-green-500" />}
+              {!pathValidating && pathValidation?.valid === false && <XCircle className="size-4 text-destructive" />}
+            </div>
+          </div>
+          <Button variant="outline" onClick={() => void browseFolder()} disabled={browsing} title="폴더 선택">
+            {browsing ? <RefreshCw className="size-4 animate-spin" /> : <FolderOpen className="size-4" />}
+            탐색
+          </Button>
+          <Button onClick={() => void saveVaultPath()} disabled={pathSaving || !pathValidation?.valid}>
             <Save className="size-4" />
             {pathSaving ? "저장 중" : "경로 저장"}
           </Button>
         </div>
+        {pathValidation && (
+          <div className={`mt-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm ${
+            pathValidation.valid
+              ? "border border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400"
+              : "border border-destructive/30 bg-destructive/10 text-destructive"
+          }`}>
+            <FileText className="size-4 shrink-0" />
+            {pathValidation.valid
+              ? <>이 폴더에서 <strong className="mx-1">{pathValidation.doc_count}개</strong> 문서를 찾았습니다.
+                  {pathValidation.extensions.length > 0 && <span className="ml-1 text-xs opacity-75">({pathValidation.extensions.join(", ")})</span>}
+                  {pathValidation.doc_count === 0 && <span className="ml-1 text-xs opacity-75">— 지원 형식(PDF, DOCX, TXT, MD)이 없을 수 있습니다.</span>}
+                </>
+              : pathValidation.error
+            }
+          </div>
+        )}
       </section>
 
       {syncEvent ? (
