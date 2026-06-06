@@ -93,7 +93,9 @@ export function AppShell({ bootstrap, dark, setDark }: AppShellProps) {
                 {bootstrap?.api_key_configured ? "API key OK" : "API key 없음"}
               </Badge>
               <Badge variant="outline">{bootstrap?.indexed_files ?? 0} files</Badge>
-              {bootstrap?.wiki?.page_count ? <Badge variant="outline">{bootstrap.wiki.page_count} wiki</Badge> : null}
+              {bootstrap?.wiki?.document_count || bootstrap?.wiki?.source_count ? (
+                <Badge variant="outline">{bootstrap.wiki.document_count ?? bootstrap.wiki.source_count} docs</Badge>
+              ) : null}
             </div>
           </div>
           <Button variant="ghost" className="w-full justify-start" onClick={() => setDark(!dark)}>

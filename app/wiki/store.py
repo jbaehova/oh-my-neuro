@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -91,7 +92,7 @@ class WikiFileStore:
 
 
 def chunk_wiki_pages(cfg: AppConfig, root: Path) -> list[Chunk]:
-    pages: list[LoadedPage] = []
+    chunks: list[Chunk] = []
     for path in sorted(root.rglob("*.md")):
         if not path.is_file():
             continue
@@ -99,7 +100,8 @@ def chunk_wiki_pages(cfg: AppConfig, root: Path) -> list[Chunk]:
         text = path.read_text(encoding="utf-8").strip()
         if not text:
             continue
-        pages.append(
+        original_source = _extract_original_source(text)
+        pages = [
             LoadedPage(
                 source=f"{cfg.wiki.directory}/{rel}",
                 doc_type="md",
@@ -107,10 +109,43 @@ def chunk_wiki_pages(cfg: AppConfig, root: Path) -> list[Chunk]:
                 location=rel,
                 text=text,
             )
+        ]
+        extras = {
+            "kind": "wiki",
+            "relative_path": cfg.wiki.directory,
+            "wiki_source": f"{cfg.wiki.directory}/{rel}",
+        }
+        if original_source:
+            extras["original_source"] = original_source
+        chunks.extend(
+            chunk_pages(
+                pages,
+                chunk_size=cfg.retrieval.chunk_size,
+                chunk_overlap=cfg.retrieval.chunk_overlap,
+                extras=extras,
+            )
         )
-    return chunk_pages(
-        pages,
-        chunk_size=cfg.retrieval.chunk_size,
-        chunk_overlap=cfg.retrieval.chunk_overlap,
-        extras={"kind": "wiki", "relative_path": cfg.wiki.directory},
-    )
+    return chunks
+
+
+def _extract_original_source(text: str) -> str:
+    meta = re.search(r"<!--\s*source:\s*(.*?)\s*-->", text)
+    if meta:
+        return meta.group(1).strip()
+    for heading in ("## 근거 문서", "## Source Documents", "## Source Notes", "## 소스 노트"):
+        idx = text.find(heading)
+        if idx == -1:
+            continue
+        section = text[idx + len(heading) :]
+        next_heading = section.find("\n## ")
+        if next_heading != -1:
+            section = section[:next_heading]
+        for line in section.splitlines():
+            cleaned = line.strip().lstrip("-*").strip()
+            if not cleaned:
+                continue
+            source = cleaned.split(":", 1)[0].strip()
+            source = source.strip("[]()")
+            if source:
+                return source
+    return ""

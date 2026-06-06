@@ -18,6 +18,9 @@ from app.vault.scanner import FileEntry, scan_vault
 from app.wiki.models import (
     WikiBuildResult,
     WikiContradiction,
+    WikiEasyIndexMatch,
+    WikiEasyIndexResponse,
+    WikiEasyIndexResult,
     WikiGraph,
     WikiGraphEdge,
     WikiGraphNode,
@@ -50,7 +53,8 @@ class WikiService:
             return WikiStatus(enabled=self._cfg.wiki.enabled, configured=False, error="Vault path is not set.")
         store = WikiFileStore(root)
         state = store.load_state()
-        page_count = len(store.markdown_pages())
+        generated_page_count = len(store.markdown_pages())
+        document_count = len(state.sources)
         indexed_chunks = 0
         if self._cfg.wiki.enabled and self._cfg.has_api_key():
             vec = wiki_vector_store(self._cfg)
@@ -62,9 +66,11 @@ class WikiService:
             enabled=self._cfg.wiki.enabled,
             configured=True,
             path=str(root),
-            page_count=page_count,
+            page_count=generated_page_count,
+            generated_page_count=generated_page_count,
+            document_count=document_count,
             indexed_chunks=indexed_chunks,
-            source_count=len(state.sources),
+            source_count=document_count,
             last_built_at=state.last_built_at,
         )
 
@@ -204,6 +210,87 @@ class WikiService:
         finally:
             vec.close()
 
+    def easy_index(self, query: str, limit: int = 8) -> WikiEasyIndexResponse:
+        q = query.strip()
+        if not q:
+            return WikiEasyIndexResponse(query=query, results=[])
+        if not self._cfg.has_api_key():
+            return WikiEasyIndexResponse(
+                query=query,
+                semantic_available=False,
+                error="OPENAI_API_KEY가 설정되어 있지 않아 easy index 검색을 수행할 수 없습니다.",
+            )
+
+        root = wiki_root(self._cfg)
+        state = WikiFileStore(root).load_state() if root is not None else WikiState()
+        limit = max(1, min(limit, 50))
+        top_k = max(limit * 2, self._cfg.retrieval.top_k)
+        fetch_k = max(limit * 4, self._cfg.retrieval.fetch_k)
+        groups: dict[str, WikiEasyIndexResult] = {}
+        errors: list[str] = []
+
+        if self._cfg.wiki.enabled and root is not None and root.exists():
+            vec = wiki_vector_store(self._cfg)
+            try:
+                for chunk in vec.search(q, top_k=top_k, fetch_k=fetch_k):
+                    for source in _sources_for_wiki_match(self._cfg, state, chunk):
+                        _merge_easy_index_match(
+                            groups,
+                            source=source,
+                            state=state,
+                            match=WikiEasyIndexMatch(
+                                kind="wiki",
+                                page_id=_wiki_page_id(self._cfg, chunk),
+                                page_title=_wiki_page_title(root, _wiki_page_id(self._cfg, chunk)),
+                                source=chunk.source,
+                                snippet=_snippet(chunk.content),
+                                score=chunk.score,
+                            ),
+                        )
+            except Exception as exc:
+                log.warning("wiki easy index search failed: %s", exc)
+                errors.append("Wiki semantic index 검색에 실패했습니다.")
+            finally:
+                vec.close()
+
+        try:
+            from app.storage.chroma_store import ChromaStore
+
+            raw_store = ChromaStore.from_config(self._cfg)
+            try:
+                for chunk in raw_store.search(q, top_k=top_k, fetch_k=fetch_k):
+                    source = _raw_source_from_chunk(chunk)
+                    if not source:
+                        continue
+                    _merge_easy_index_match(
+                        groups,
+                        source=source,
+                        state=state,
+                        match=WikiEasyIndexMatch(
+                            kind="document",
+                            page_id=state.sources.get(source).source_page if source in state.sources else "",
+                            page_title=state.sources.get(source).title if source in state.sources else Path(source).name,
+                            source=source,
+                            snippet=_snippet(chunk.content),
+                            score=chunk.score,
+                        ),
+                        doc_type=chunk.doc_type or Path(source).suffix.lstrip("."),
+                    )
+            finally:
+                raw_store.close()
+        except Exception as exc:
+            log.warning("raw easy index search failed: %s", exc)
+            errors.append("원본 문서 semantic index 검색에 실패했습니다.")
+
+        results = sorted(groups.values(), key=lambda item: item.score, reverse=True)[:limit]
+        semantic_available = bool(results) or len(errors) < 2
+        return WikiEasyIndexResponse(
+            query=query,
+            semantic_available=semantic_available,
+            error=" ".join(errors) if errors and not results else "",
+            results=results,
+        )
+
     def build_graph(self) -> WikiGraph:
         root = wiki_root(self._cfg)
         if root is None:
@@ -212,16 +299,35 @@ class WikiService:
         nodes: dict[str, WikiGraphNode] = {}
         edges: list[WikiGraphEdge] = []
 
-        def add_node(node_id: str, label: str, kind: str, page_id: str) -> str:
+        def add_node(
+            node_id: str,
+            label: str,
+            kind: str,
+            page_id: str,
+            *,
+            source_path: str = "",
+        ) -> str:
             if node_id not in nodes:
-                nodes[node_id] = WikiGraphNode(id=node_id, label=label, kind=kind, page_id=page_id)  # type: ignore[arg-type]
+                nodes[node_id] = WikiGraphNode(
+                    id=node_id,
+                    label=label,
+                    kind=kind,
+                    page_id=page_id,
+                    source_path=source_path,
+                )  # type: ignore[arg-type]
             return node_id
 
         for rel, page in [("index.md", "Vault Wiki Index"), ("open-questions.md", "Open Questions"), ("contradictions.md", "Contradictions")]:
             add_node(f"page:{rel}", page, "page", rel)
 
         for source, source_state in sorted(state.sources.items()):
-            source_id = add_node(f"source:{source}", Path(source).name, "source", source_state.source_page)
+            source_id = add_node(
+                f"source:{source}",
+                Path(source).name,
+                "source",
+                source_state.source_page,
+                source_path=source,
+            )
             page_id = add_node(f"page:{source_state.source_page}", source_state.title, "page", source_state.source_page)
             edges.append(WikiGraphEdge(source=source_id, target=page_id, label="summarized"))
             for concept, desc in source_state.concepts.items():
@@ -306,7 +412,11 @@ class WikiService:
         ):
             return False, existing
 
-        pages = load_document(entry.absolute_path, relative_path=entry.relative_path)
+        pages = load_document(
+            entry.absolute_path,
+            relative_path=entry.relative_path,
+            ingestion=self._cfg.ingestion,
+        )
         text = _loaded_pages_text(pages, self._cfg.wiki.max_source_chars)
         llm = self._ensure_llm()
         if not hasattr(llm, "wiki_source_summary"):
@@ -431,6 +541,104 @@ class WikiService:
                         )
                     )
         return found
+
+
+def _merge_easy_index_match(
+    groups: dict[str, WikiEasyIndexResult],
+    *,
+    source: str,
+    state: WikiState,
+    match: WikiEasyIndexMatch,
+    doc_type: str = "",
+) -> None:
+    source = source.strip().lstrip("/\\")
+    if not source:
+        return
+    source_state = state.sources.get(source)
+    result = groups.get(source)
+    if result is None:
+        result = WikiEasyIndexResult(
+            source=source,
+            title=source_state.title if source_state else Path(source).name,
+            doc_type=doc_type or Path(source).suffix.lstrip("."),
+            score=match.score,
+            excerpt=_excerpt(source_state.excerpt if source_state else match.snippet),
+            concepts=sorted(source_state.concepts) if source_state else [],
+            matches=[],
+        )
+        groups[source] = result
+
+    if match.score > result.score:
+        result.score = match.score
+        if not source_state:
+            result.excerpt = match.snippet
+    if doc_type and not result.doc_type:
+        result.doc_type = doc_type
+    if not result.excerpt and match.snippet:
+        result.excerpt = match.snippet
+
+    seen = {(item.kind, item.page_id, item.source, item.snippet) for item in result.matches}
+    key = (match.kind, match.page_id, match.source, match.snippet)
+    if key not in seen:
+        result.matches.append(match)
+    result.matches.sort(key=lambda item: item.score, reverse=True)
+    del result.matches[6:]
+
+
+def _sources_for_wiki_match(cfg: AppConfig, state: WikiState, chunk: RetrievedChunk) -> list[str]:
+    original_source = str(chunk.metadata.get("original_source") or "").strip()
+    page_id = _wiki_page_id(cfg, chunk)
+    if not page_id:
+        return [original_source] if original_source else []
+
+    if page_id.startswith("sources/"):
+        for source, source_state in state.sources.items():
+            if source_state.source_page == page_id:
+                return [source]
+        return [original_source] if original_source else []
+
+    if page_id.startswith("concepts/"):
+        sources: list[str] = []
+        seen: set[str] = set()
+        for source, source_state in state.sources.items():
+            for concept in source_state.concepts:
+                if f"concepts/{_slug(concept)}.md" == page_id and source not in seen:
+                    seen.add(source)
+                    sources.append(source)
+        return sources or ([original_source] if original_source else [])
+
+    return [original_source] if original_source else []
+
+
+def _wiki_page_id(cfg: AppConfig, chunk: RetrievedChunk) -> str:
+    prefix = f"{cfg.wiki.directory}/"
+    for key in ("wiki_source", "source"):
+        value = str(chunk.metadata.get(key) or "")
+        if value.startswith(prefix):
+            return value[len(prefix) :].lstrip("/")
+    location = str(chunk.metadata.get("location") or chunk.location or "")
+    return location.strip("/") if location.endswith(".md") else ""
+
+
+def _wiki_page_title(root: Path | None, page_id: str) -> str:
+    if not page_id:
+        return ""
+    path = root / page_id if root is not None else None
+    if path is not None and path.exists() and path.is_file():
+        content = path.read_text(encoding="utf-8", errors="replace")
+        return _title_from_markdown(content, page_id)
+    return Path(page_id).stem.replace("-", " ").strip() or page_id
+
+
+def _raw_source_from_chunk(chunk: RetrievedChunk) -> str:
+    return str(chunk.metadata.get("relative_path") or chunk.source or "").strip()
+
+
+def _snippet(text: str, limit: int = 260) -> str:
+    normalized = re.sub(r"\s+", " ", re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)).strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1].rstrip() + "…"
 
 
 def _notify(progress: ProgressCallback | None, name: str, stage: str, fraction: float | None) -> None:

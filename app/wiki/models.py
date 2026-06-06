@@ -38,6 +38,8 @@ class WikiStatus(BaseModel):
     configured: bool
     path: str = ""
     page_count: int = 0
+    generated_page_count: int = 0
+    document_count: int = 0
     indexed_chunks: int = 0
     source_count: int = 0
     last_built_at: str | None = None
@@ -81,6 +83,7 @@ class WikiGraphNode(BaseModel):
     label: str
     kind: Literal["concept", "source", "page"]
     page_id: str
+    source_path: str = ""
 
 
 class WikiGraphEdge(BaseModel):
@@ -92,3 +95,29 @@ class WikiGraphEdge(BaseModel):
 class WikiGraph(BaseModel):
     nodes: list[WikiGraphNode] = Field(default_factory=list)
     edges: list[WikiGraphEdge] = Field(default_factory=list)
+
+
+class WikiEasyIndexMatch(BaseModel):
+    kind: Literal["wiki", "document"]
+    page_id: str = ""
+    page_title: str = ""
+    source: str = ""
+    snippet: str = ""
+    score: float = 0.0
+
+
+class WikiEasyIndexResult(BaseModel):
+    source: str
+    title: str
+    doc_type: str = ""
+    score: float = 0.0
+    excerpt: str = ""
+    concepts: list[str] = Field(default_factory=list)
+    matches: list[WikiEasyIndexMatch] = Field(default_factory=list)
+
+
+class WikiEasyIndexResponse(BaseModel):
+    query: str
+    semantic_available: bool = True
+    error: str = ""
+    results: list[WikiEasyIndexResult] = Field(default_factory=list)

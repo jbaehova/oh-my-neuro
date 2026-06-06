@@ -5,7 +5,15 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.api.deps import effective_config
-from app.wiki.models import WikiBuildResult, WikiGraph, WikiLintIssue, WikiPageContent, WikiPageSummary, WikiStatus
+from app.wiki.models import (
+    WikiBuildResult,
+    WikiEasyIndexResponse,
+    WikiGraph,
+    WikiLintIssue,
+    WikiPageContent,
+    WikiPageSummary,
+    WikiStatus,
+)
 from app.wiki.service import WikiService
 
 router = APIRouter(prefix="/wiki", tags=["wiki"])
@@ -19,6 +27,11 @@ def status() -> WikiStatus:
 @router.get("/pages", response_model=list[WikiPageSummary])
 def pages(q: str = "") -> list[WikiPageSummary]:
     return WikiService(effective_config()).list_pages(q)
+
+
+@router.get("/easy-index", response_model=WikiEasyIndexResponse)
+def easy_index(q: str = "", limit: int = 8) -> WikiEasyIndexResponse:
+    return WikiService(effective_config()).easy_index(q, limit=limit)
 
 
 @router.get("/page", response_model=WikiPageContent)

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from app.common.models import RetrievedChunk
 from app.config.loader import AppConfig
 from app.vault.scanner import scan_vault
 from app.wiki.service import WikiService
@@ -70,6 +71,17 @@ class FakeLLM:
 """
 
 
+class FakeVectorStore:
+    def __init__(self, chunks: list[RetrievedChunk]) -> None:
+        self._chunks = chunks
+
+    def search(self, query: str, top_k: int = 5, fetch_k: int | None = None) -> list[RetrievedChunk]:
+        return self._chunks[:top_k]
+
+    def close(self) -> None:
+        return None
+
+
 def test_scan_vault_excludes_configured_generated_wiki(tmp_path: Path) -> None:
     (tmp_path / "keep.md").write_text("keep", encoding="utf-8")
     wiki_dir = tmp_path / "generated-wiki"
@@ -100,6 +112,23 @@ def test_wiki_rebuild_writes_markdown_without_indexing(tmp_path: Path) -> None:
     assert "Test Concept" in (tmp_path / "_omn_wiki" / "index.md").read_text(encoding="utf-8")
 
 
+def test_wiki_status_separates_documents_from_generated_pages(tmp_path: Path) -> None:
+    (tmp_path / "note.md").write_text("Alpha beta gamma", encoding="utf-8")
+    cfg = AppConfig(
+        vault={"path": str(tmp_path)},
+        wiki={"enabled": True, "directory": "_omn_wiki"},
+        openai_api_key="",
+    )
+    WikiService(cfg, llm=FakeLLM()).rebuild(index=False)
+
+    status = WikiService(cfg, llm=FakeLLM()).status()
+
+    assert status.document_count == 1
+    assert status.source_count == 1
+    assert status.generated_page_count > status.document_count
+    assert status.page_count == status.generated_page_count
+
+
 def test_wiki_build_graph(tmp_path: Path) -> None:
     (tmp_path / "note.md").write_text("Alpha beta gamma", encoding="utf-8")
     cfg = AppConfig(
@@ -112,7 +141,111 @@ def test_wiki_build_graph(tmp_path: Path) -> None:
 
     assert graph.nodes
     assert any(node.kind == "concept" for node in graph.nodes)
+    assert any(node.kind == "source" and node.source_path == "note.md" for node in graph.nodes)
     assert graph.edges
+
+
+def test_wiki_easy_index_merges_wiki_and_raw_matches(tmp_path: Path, monkeypatch) -> None:
+    import app.wiki.service as wiki_service_module
+    from app.storage.chroma_store import ChromaStore
+    from app.wiki.service import _slug
+
+    (tmp_path / "note.md").write_text("Alpha beta gamma", encoding="utf-8")
+    cfg = AppConfig(
+        vault={"path": str(tmp_path)},
+        wiki={"enabled": True, "directory": "_omn_wiki"},
+        openai_api_key="test-key",
+    )
+    WikiService(cfg, llm=FakeLLM()).rebuild(index=False)
+    concept_page = f"_omn_wiki/concepts/{_slug('Test Concept')}.md"
+    wiki_chunk = RetrievedChunk(
+        chunk_id="wiki-1",
+        content="Semantic wiki match about Alpha",
+        metadata={
+            "source": concept_page,
+            "wiki_source": concept_page,
+            "location": concept_page.removeprefix("_omn_wiki/"),
+            "kind": "wiki",
+        },
+        score=0.91,
+    )
+    raw_chunk = RetrievedChunk(
+        chunk_id="raw-1",
+        content="Raw document match about Alpha",
+        metadata={"source": "note.md", "relative_path": "note.md", "doc_type": "md"},
+        score=0.83,
+    )
+    monkeypatch.setattr(wiki_service_module, "wiki_vector_store", lambda cfg: FakeVectorStore([wiki_chunk]))
+    monkeypatch.setattr(ChromaStore, "from_config", classmethod(lambda cls, cfg: FakeVectorStore([raw_chunk])))
+
+    response = WikiService(cfg, llm=FakeLLM()).easy_index("alpha")
+
+    assert response.semantic_available is True
+    assert response.error == ""
+    assert [result.source for result in response.results] == ["note.md"]
+    assert response.results[0].score == 0.91
+    assert {match.kind for match in response.results[0].matches} == {"wiki", "document"}
+
+
+def test_wiki_easy_index_expands_concept_match_with_original_source(tmp_path: Path, monkeypatch) -> None:
+    import app.wiki.service as wiki_service_module
+    from app.storage.chroma_store import ChromaStore
+    from app.wiki.models import WikiSourceState, WikiState
+    from app.wiki.service import _slug
+    from app.wiki.store import WikiFileStore
+
+    cfg = AppConfig(
+        vault={"path": str(tmp_path)},
+        wiki={"enabled": True, "directory": "_omn_wiki"},
+        openai_api_key="test-key",
+    )
+    wiki_root = tmp_path / "_omn_wiki"
+    store = WikiFileStore(wiki_root)
+    store.ensure()
+    concept_page_id = f"concepts/{_slug('Shared Concept')}.md"
+    (wiki_root / concept_page_id).write_text(
+        "# Shared Concept\n\n## 근거 문서\n- alpha.md\n- beta.md\n",
+        encoding="utf-8",
+    )
+    store.save_state(
+        WikiState(
+            sources={
+                "alpha.md": WikiSourceState(
+                    content_hash="alpha",
+                    source_page="sources/alpha.md-aaaaaaaa.md",
+                    title="alpha",
+                    updated_at="now",
+                    concepts={"Shared Concept": "alpha description"},
+                ),
+                "beta.md": WikiSourceState(
+                    content_hash="beta",
+                    source_page="sources/beta.md-bbbbbbbb.md",
+                    title="beta",
+                    updated_at="now",
+                    concepts={"Shared Concept": "beta description"},
+                ),
+            }
+        )
+    )
+    wiki_chunk = RetrievedChunk(
+        chunk_id="wiki-1",
+        content="Semantic wiki match about the shared concept",
+        metadata={
+            "source": f"_omn_wiki/{concept_page_id}",
+            "wiki_source": f"_omn_wiki/{concept_page_id}",
+            "location": concept_page_id,
+            "kind": "wiki",
+            "original_source": "alpha.md",
+        },
+        score=0.92,
+    )
+    monkeypatch.setattr(wiki_service_module, "wiki_vector_store", lambda cfg: FakeVectorStore([wiki_chunk]))
+    monkeypatch.setattr(ChromaStore, "from_config", classmethod(lambda cls, cfg: FakeVectorStore([])))
+
+    response = WikiService(cfg, llm=FakeLLM()).easy_index("shared")
+
+    assert [result.source for result in response.results] == ["alpha.md", "beta.md"]
+    assert all(result.matches[0].kind == "wiki" for result in response.results)
 
 
 def test_render_concept_merges_source_key_facts(tmp_path: Path) -> None:

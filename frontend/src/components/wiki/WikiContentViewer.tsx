@@ -28,6 +28,7 @@ import {
   type WikiDocumentMeta,
   type WikiSection,
 } from "@/lib/wikiContent";
+import { openFile } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type WikiContentViewerProps = {
@@ -88,9 +89,13 @@ export function WikiContentViewer({
       isKnownSection(sec),
   );
 
-  function openVault(source: string) {
-    const filename = source.split("/").pop() || source;
-    navigate(`/vault?q=${encodeURIComponent(filename)}`);
+  async function openVault(source: string) {
+    try {
+      await openFile(source);
+    } catch {
+      const filename = source.split("/").pop() || source;
+      navigate(`/vault?q=${encodeURIComponent(filename)}`);
+    }
   }
 
   function askQuestion(question: string) {
@@ -172,8 +177,8 @@ export function WikiContentViewer({
                       원본 문서 노트
                     </Button>
                   ) : null}
-                  <Button variant="outline" size="sm" className="rounded-md" onClick={() => openVault(src.source)}>
-                    Vault
+                  <Button variant="outline" size="sm" className="rounded-md" onClick={() => void openVault(src.source)}>
+                    파일 열기
                   </Button>
                 </div>
               </div>
@@ -398,7 +403,7 @@ function DocumentMetaPanel({ meta }: { meta: WikiDocumentMeta }) {
     { label: "사건 코드", value: meta.caseCode },
   ].filter((field) => field.value);
 
-  if (fields.length === 0 && !meta.disclaimer && !meta.vaultPath) return null;
+  if (fields.length === 0 && !meta.disclaimer) return null;
 
   return (
     <section className="wiki-doc-meta mt-6 rounded-xl border bg-background/80 px-4 py-4 sm:px-5 sm:py-5">
@@ -411,11 +416,6 @@ function DocumentMetaPanel({ meta }: { meta: WikiDocumentMeta }) {
             </div>
           ))}
         </dl>
-      ) : null}
-      {meta.vaultPath ? (
-        <p className="mt-3 truncate text-xs text-muted-foreground">
-          <span className="font-medium text-foreground/70">원본</span> · {meta.vaultPath}
-        </p>
       ) : null}
       {meta.disclaimer ? (
         <p className="mt-3 rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">

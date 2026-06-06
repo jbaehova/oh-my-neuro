@@ -1,344 +1,317 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { AlertTriangle, BookOpen, FileText, Loader2, RefreshCw, Search } from "lucide-react";
+import { BookOpen, FileText, Loader2, RefreshCw, Search, Sparkles } from "lucide-react";
 
-import { WikiContentViewer } from "@/components/wiki/WikiContentViewer";
+import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WikiKnowledgeMap } from "@/components/wiki/WikiKnowledgeMap";
 import {
+  easyIndexWiki,
+  getWikiGraph,
   getWikiLint,
-  getWikiPage,
   getWikiPages,
   getWikiStatus,
+  openFile,
   rebuildWiki,
-  WikiLintIssue,
-  WikiPageContent,
-  WikiPageSummary,
-  WikiStatus,
+  type WikiEasyIndexResponse,
+  type WikiGraph,
+  type WikiLintIssue,
+  type WikiPageSummary,
+  type WikiStatus,
 } from "@/lib/api";
-import {
-  buildTopicChatParams,
-  buildWikiArticleModel,
-  buildWikiDisplayModel,
-  cleanWikiExcerpt,
-  getTopicSummary,
-  parseWikiContent,
-  relativeTimeFromIso,
-  topicParamsToSearch,
-} from "@/lib/wikiContent";
-import { newSessionId } from "@/hooks/useSessions";
 import { cn } from "@/lib/utils";
-
-type LoadOptions = {
-  selectFirst?: boolean;
-  pageId?: string | null;
-};
 
 export function WikiPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
+  const selectedPage = params.get("page") || "";
   const [status, setStatus] = useState<WikiStatus | null>(null);
   const [pages, setPages] = useState<WikiPageSummary[]>([]);
-  const [selected, setSelected] = useState<WikiPageContent | null>(null);
+  const [graph, setGraph] = useState<WikiGraph | null>(null);
   const [issues, setIssues] = useState<WikiLintIssue[]>([]);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => params.get("q") || "");
+  const [easyIndex, setEasyIndex] = useState<WikiEasyIndexResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pageLoading, setPageLoading] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
 
-  const documentPages = useMemo(
-    () => pages.filter((page) => page.section === "sources"),
-    [pages],
-  );
-
-  const filteredPages = documentPages;
-
-  const contradictionConcepts = useMemo(
-    () =>
-      issues
-        .filter((issue) => issue.code === "contradiction")
-        .map((issue) => String(issue.metadata?.concept || ""))
-        .filter(Boolean),
-    [issues],
-  );
-
-  const selectedTopic = useMemo(() => {
-    if (!selected) return null;
-    const parsed = parseWikiContent(selected.content);
-    const article = buildWikiArticleModel(parsed, selected.title, selected.linked_source_pages ?? []);
-    const summarySection = parsed.sections.find((section) => section.normalized === "summary");
-    const sourceNotesSection = parsed.sections.find((section) => section.normalized === "source notes");
-    const display = buildWikiDisplayModel(parsed, summarySection, sourceNotesSection);
-    return {
-      parsed,
-      display,
-      summary: article.introLine || getTopicSummary(parsed, display),
-    };
-  }, [selected]);
-
-  const choose = useCallback(async (page: WikiPageSummary | string) => {
-    const pageId = typeof page === "string" ? page : page.id;
-    setPageLoading(true);
+  async function load() {
     setError("");
-    try {
-      const content = await getWikiPage(pageId);
-      setSelected(content);
-      setParams({ page: pageId }, { replace: true });
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Wiki 페이지를 불러오지 못했습니다.");
-    } finally {
-      setPageLoading(false);
-    }
-  }, [setParams]);
-
-  async function load(nextQuery = query, options: LoadOptions = {}) {
     setLoading(true);
-    setError("");
     try {
-      const [nextStatus, nextPages, nextIssues] = await Promise.all([
+      const [nextStatus, nextPages, nextGraph, nextIssues] = await Promise.all([
         getWikiStatus(),
-        getWikiPages(nextQuery),
+        getWikiPages(),
+        getWikiGraph(),
         getWikiLint(),
       ]);
       setStatus(nextStatus);
       setPages(nextPages);
+      setGraph(nextGraph);
       setIssues(nextIssues);
-
-      const targetId = options.pageId ?? params.get("page");
-      if (targetId) {
-        const found = nextPages.find((p) => p.id === targetId);
-        if (found || targetId) {
-          await choose(targetId);
-          return;
-        }
-      }
-      if ((options.selectFirst || !selected) && nextPages.length > 0) {
-        const preferred = nextPages.find((page) => page.section === "sources") ?? nextPages[0];
-        await choose(preferred.id);
-      }
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Wiki를 불러오지 못했습니다.");
+      setError(exc instanceof Error ? exc.message : "Wiki 정보를 불러오지 못했습니다.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    void load("", { selectFirst: !params.get("page"), pageId: params.get("page") });
-    // Initial load only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void load();
   }, []);
 
-  async function search() {
-    setSelected(null);
-    await load(query, { selectFirst: true });
+  const highlightedSources = useMemo(
+    () => easyIndex?.results.map((item) => item.source) ?? [],
+    [easyIndex],
+  );
+  const sourceByPageId = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const node of graph?.nodes ?? []) {
+      if (node.kind === "source" && node.page_id && node.source_path) {
+        out.set(node.page_id, node.source_path);
+      }
+    }
+    return out;
+  }, [graph]);
+
+  const okIssue = issues.length === 1 && issues[0]?.code === "ok";
+
+  async function submitSearch(event?: FormEvent) {
+    event?.preventDefault();
+    const q = query.trim();
+    const next = new URLSearchParams(params);
+    if (q) next.set("q", q);
+    else next.delete("q");
+    setParams(next, { replace: true });
+    await load();
+    if (!q) {
+      setEasyIndex(null);
+      return;
+    }
+    setSearching(true);
+    try {
+      setEasyIndex(await easyIndexWiki(q));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Easy index 검색에 실패했습니다.");
+    } finally {
+      setSearching(false);
+    }
   }
 
   async function rebuild() {
     setRebuilding(true);
     setError("");
     try {
-      const result = await rebuildWiki(true);
-      if (result.sources_processed === 0 && result.pages_written === 0) {
-        setError("Rebuild가 완료됐지만 생성된 페이지가 없습니다. Vault 경로와 OPENAI_API_KEY를 확인해주세요.");
-      }
-      setSelected(null);
-      await load(query, { selectFirst: true });
+      await rebuildWiki(true);
+      await load();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Wiki 재생성에 실패했습니다.");
+      setError(exc instanceof Error ? exc.message : "Wiki rebuild에 실패했습니다.");
     } finally {
       setRebuilding(false);
     }
   }
 
-  function askAboutTopic() {
-    if (!selected || !selectedTopic) return;
-    const session = newSessionId();
-    const topicSearch = topicParamsToSearch(buildTopicChatParams(selected, selectedTopic.summary));
-    navigate(`/chat?session=${session}&${topicSearch}`);
+  function selectPage(pageId: string) {
+    const next = new URLSearchParams(params);
+    next.set("page", pageId);
+    setParams(next, { replace: true });
   }
 
-  function askWithQuestion(question: string) {
-    if (!selected || !selectedTopic) return;
-    const session = newSessionId();
-    const topicSearch = topicParamsToSearch(buildTopicChatParams(selected, selectedTopic.summary));
-    navigate(`/chat?session=${session}&${topicSearch}&prompt=${encodeURIComponent(question)}`);
+  async function openSource(source: string) {
+    try {
+      await openFile(source);
+    } catch {
+      navigate(`/vault?q=${encodeURIComponent(source.split("/").pop() || source)}`);
+    }
   }
-
-  function learnMoreAboutTopic() {
-    if (!selected) return;
-    navigate(`/wiki/detail?page=${encodeURIComponent(selected.id)}`);
-  }
-
-  const warningCount = useMemo(() => issues.filter((issue) => issue.severity !== "info" && issue.code !== "ok").length, [issues]);
 
   return (
     <>
       <PageHeader
         title="Wiki"
-        description="Vault 문서를 LLM이 정리한 Markdown 지식 레이어입니다."
+        description="Vault 문서를 요약한 Markdown 지식 레이어와 원본 문서 관계를 확인합니다."
         action={
-          <Button onClick={rebuild} disabled={rebuilding || !status?.configured || !status?.enabled}>
-            <RefreshCw className={rebuilding ? "size-4 animate-spin" : "size-4"} />
-            Rebuild
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={status?.enabled ? "secondary" : "warning"}>
+              {status?.enabled ? "Wiki ON" : "Wiki OFF"}
+            </Badge>
+            <Button onClick={() => void rebuild()} disabled={rebuilding}>
+              {rebuilding ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+              Rebuild
+            </Button>
+          </div>
         }
       />
 
+      {error ? (
+        <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/[0.06] px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
       <section className="grid gap-3 md:grid-cols-4">
-        <Metric label="상태" value={status?.enabled ? "활성" : "비활성"} />
-        <Metric label="페이지" value={`${status?.page_count ?? 0}`} />
-        <Metric label="소스" value={`${status?.source_count ?? 0}`} />
-        <Metric label="마지막 빌드" value={relativeTimeFromIso(status?.last_built_at)} />
+        <Metric label="상태" value={status?.configured ? "설정됨" : "Vault 필요"} />
+        <Metric label="문서" value={`${status?.document_count ?? status?.source_count ?? 0}`} />
+        <Metric label="생성 페이지" value={`${status?.generated_page_count ?? status?.page_count ?? pages.length}`} />
+        <Metric label="위키 청크" value={`${status?.indexed_chunks ?? 0}`} />
       </section>
 
-      {error && (
-        <section className="mt-5 rounded-lg border border-destructive/30 p-4 text-sm text-destructive">
-          {error}
-        </section>
-      )}
-
-      {status?.error && (
-        <section className="mt-5 flex items-center gap-2 rounded-lg border border-amber-400/40 p-4 text-sm">
-          <AlertTriangle className="size-4 text-amber-500" />
-          <span>{status.error}</span>
-        </section>
-      )}
-
-      <div className="mt-7 grid gap-5 lg:grid-cols-[320px_1fr]">
-        <aside className="space-y-4">
-          <div className="surface rounded-lg p-3">
-            <div className="flex gap-2">
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-6">
+          <form onSubmit={submitSearch} className="surface rounded-lg p-4">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void search();
-                  }}
-                  placeholder="Wiki 검색"
                   className="pl-9"
+                  placeholder="Wiki와 원본 문서를 함께 검색"
                 />
               </div>
-              <Button variant="outline" size="icon" onClick={search}>
-                <Search className="size-4" />
+              <Button type="submit" disabled={loading || searching}>
+                {searching ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                Easy index
               </Button>
             </div>
-          </div>
+          </form>
 
-          <div className="overflow-hidden rounded-lg border">
-            <div className="flex items-center justify-between border-b bg-secondary px-3 py-2">
-              <div className="text-xs font-medium text-muted-foreground">문서 노트</div>
-              <Badge variant="outline">{filteredPages.length}</Badge>
-            </div>
-            <div className="max-h-[520px] overflow-y-auto">
-              {loading ? (
-                <div className="p-3 text-sm text-muted-foreground">Loading</div>
-              ) : filteredPages.length === 0 ? (
-                <div className="p-3 text-sm text-muted-foreground">Wiki 페이지가 없습니다.</div>
+          {easyIndex ? (
+            <section className="surface rounded-lg p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold">Easy index 결과</h2>
+                <Badge variant={easyIndex.semantic_available ? "secondary" : "warning"}>
+                  {easyIndex.results.length} sources
+                </Badge>
+              </div>
+              {easyIndex.error || !easyIndex.semantic_available ? (
+                <p className="mt-3 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-foreground">
+                  {easyIndex.error || "Semantic index를 사용할 수 없습니다."}
+                </p>
+              ) : null}
+              {easyIndex.results.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {easyIndex.results.map((result) => (
+                    <button
+                      key={result.source}
+                      type="button"
+                      onClick={() => void openSource(result.source)}
+                      className="block w-full rounded-md border px-3 py-2 text-left transition hover:bg-secondary/50"
+                    >
+                      <div className="flex min-w-0 items-center justify-between gap-3">
+                        <span className="truncate text-sm font-medium">{result.title}</span>
+                        <Badge variant="outline">{result.score.toFixed(2)}</Badge>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                        {cleanExcerpt(result.excerpt) || result.source}
+                      </p>
+                    </button>
+                  ))}
+                </div>
               ) : (
-                filteredPages.map((page) => (
-                  <button
-                    key={page.id}
-                    type="button"
-                    onClick={() => void choose(page)}
-                    className={cn(
-                      "block w-full border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-secondary",
-                      selected?.id === page.id && "bg-secondary",
-                    )}
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <FileText className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="truncate font-medium">{page.title}</span>
+                <div className="mt-3 rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+                  검색 결과가 없습니다.
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {loading ? (
+            <div className="grid min-h-[360px] place-items-center text-sm text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <Loader2 className="size-4 animate-spin" />
+                Wiki 불러오는 중
+              </div>
+            </div>
+          ) : pages.length === 0 ? (
+            <EmptyState
+              title="생성된 Wiki 페이지가 없습니다"
+              description="Vault를 동기화한 뒤 Rebuild를 실행하면 문서 노트와 개념 페이지가 생성됩니다."
+              action={
+                <Button onClick={() => void rebuild()} disabled={rebuilding}>
+                  Rebuild 실행
+                </Button>
+              }
+            />
+          ) : (
+            <section className="grid gap-3 md:grid-cols-2">
+              {pages.map((page) => (
+                <button
+                  key={page.id}
+                  type="button"
+                  onClick={() => {
+                    const source = sourceByPageId.get(page.id);
+                    if (source) {
+                      void openSource(source);
+                      return;
+                    }
+                    selectPage(page.id);
+                    navigate(`/wiki/detail?page=${encodeURIComponent(page.id)}`);
+                  }}
+                  className={cn(
+                    "surface min-w-0 rounded-lg border p-4 text-left transition hover:border-primary/30",
+                    selectedPage === page.id && "border-primary/50 bg-secondary/40",
+                  )}
+                >
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <BookOpen className="size-4 shrink-0 text-muted-foreground" />
+                        <h2 className="truncate text-sm font-semibold">{page.title}</h2>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">{page.path}</p>
                     </div>
-                    <div className="mt-1 truncate text-xs text-muted-foreground">
-                      {cleanWikiExcerpt(page.excerpt) || page.path}
+                    <Badge variant="outline">{sectionLabel(page.section)}</Badge>
+                  </div>
+                  <p className="mt-3 line-clamp-3 text-sm leading-6 text-muted-foreground">
+                    {cleanExcerpt(page.excerpt) || "요약 없음"}
+                  </p>
+                </button>
+              ))}
+            </section>
+          )}
+        </div>
+
+        <aside className="space-y-6">
+          <WikiKnowledgeMap
+            graph={graph}
+            selectedPageId={selectedPage}
+            highlightedSources={highlightedSources}
+            onSelectPage={(pageId) => {
+              selectPage(pageId);
+              navigate(`/wiki/detail?page=${encodeURIComponent(pageId)}`);
+            }}
+            onOpenSource={(source) => void openSource(source)}
+          />
+
+          <section className="surface rounded-lg p-4">
+            <div className="flex items-center gap-2">
+              <FileText className="size-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">검사 결과</h2>
+            </div>
+            <div className="mt-3 space-y-2">
+              {okIssue ? (
+                <p className="text-sm text-muted-foreground">Wiki lint issue가 없습니다.</p>
+              ) : (
+                issues.map((issue) => (
+                  <div key={`${issue.code}-${issue.page}-${issue.message}`} className="rounded-md border px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium">{issue.code}</span>
+                      <Badge variant={issue.severity === "error" ? "warning" : "outline"}>{issue.severity}</Badge>
                     </div>
-                  </button>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{issue.message}</p>
+                  </div>
                 ))
               )}
             </div>
-          </div>
-
-          <div className="rounded-lg border p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="text-xs font-medium text-muted-foreground">Lint</div>
-              <Badge variant={warningCount ? "warning" : "secondary"}>{warningCount ? `${warningCount} issues` : "OK"}</Badge>
-            </div>
-            <div className="space-y-2">
-              {issues.slice(0, 5).map((issue) => (
-                <div key={`${issue.code}-${issue.page || ""}-${issue.message}`} className="text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">{issue.code}</span>: {issue.message}
-                </div>
-              ))}
-            </div>
-          </div>
+          </section>
         </aside>
-
-        <section className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-muted/20">
-          {selected ? (
-            <div className="scrollbar-soft max-h-[calc(100vh-220px)] flex-1 overflow-y-auto">
-              {pageLoading ? (
-                <WikiContentSkeleton />
-              ) : (
-                <WikiContentViewer
-                  content={selected.content}
-                  pageTitle={selected.title}
-                  pagePath={selected.path}
-                  section={selected.section}
-                  updatedAt={selected.updated_at}
-                  linkedSourcePages={selected.linked_source_pages ?? []}
-                  contradictionConcepts={contradictionConcepts}
-                  onNavigatePage={(pageId) => void choose(pageId)}
-                  onAskTopic={askAboutTopic}
-                  onAskWithQuestion={askWithQuestion}
-                  onLearnMore={learnMoreAboutTopic}
-                />
-              )}
-            </div>
-          ) : (
-            <div className="grid min-h-[420px] place-items-center p-8 text-center">
-              <div>
-                <BookOpen className="mx-auto size-8 text-muted-foreground" />
-                <div className="mt-3 text-sm font-medium">Wiki page를 선택하세요</div>
-                <div className="mt-1 text-xs text-muted-foreground">Rebuild 후 생성된 Markdown 지식 페이지를 확인할 수 있습니다.</div>
-              </div>
-            </div>
-          )}
-        </section>
       </div>
     </>
-  );
-}
-
-function WikiContentSkeleton() {
-  return (
-    <div className="space-y-5 p-5 sm:p-6">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        페이지 불러오는 중
-      </div>
-      <div className="animate-pulse rounded-2xl border bg-muted/30 p-7">
-        <div className="h-3 w-16 rounded bg-muted" />
-        <div className="mt-4 h-7 w-2/3 rounded bg-muted" />
-        <div className="mt-3 h-4 w-full rounded bg-muted" />
-      </div>
-      {[0, 1].map((i) => (
-        <div key={i} className="animate-pulse rounded-2xl border p-5">
-          <div className="flex gap-4">
-            <div className="size-9 rounded-xl bg-muted" />
-            <div className="flex-1 space-y-2">
-              <div className="h-3 w-full rounded bg-muted" />
-              <div className="h-3 w-4/5 rounded bg-muted" />
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -349,4 +322,20 @@ function Metric({ label, value }: { label: string; value: string }) {
       <div className="mt-1 truncate text-sm font-semibold">{value}</div>
     </div>
   );
+}
+
+function sectionLabel(section: string) {
+  if (section === "sources") return "문서";
+  if (section === "concepts") return "개념";
+  if (section === "root") return "요약";
+  return section || "wiki";
+}
+
+function cleanExcerpt(value?: string) {
+  if (!value) return "";
+  return value
+    .replace(/Generated at:\s*\S+/gi, "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
