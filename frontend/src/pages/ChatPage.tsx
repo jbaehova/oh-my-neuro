@@ -193,6 +193,11 @@ export function ChatPage() {
     setRunning(false);
   }
 
+  function setWebSearchEnabled(checked: boolean) {
+    window.localStorage.setItem(WEB_SEARCH_TOUCHED_KEY, "true");
+    setWebSearch(checked);
+  }
+
   return (
     <div className="flex min-h-[calc(100vh-2rem)] flex-col">
       <div className="mb-4 flex items-center justify-between border-b pb-4">
@@ -269,19 +274,21 @@ export function ChatPage() {
           </div>
         ) : null}
         <div className="surface mx-auto flex max-w-4xl items-end gap-2 rounded-lg p-2">
-          <Button
+          <button
             type="button"
-            variant={webSearch ? "secondary" : "outline"}
-            className="mb-0.5 shrink-0"
-            onClick={() => {
-              window.localStorage.setItem(WEB_SEARCH_TOUCHED_KEY, "true");
-              setWebSearch((value) => !value);
-            }}
+            aria-pressed={webSearch}
+            aria-label={webSearch ? "웹검색 켜짐" : "웹검색 꺼짐"}
+            className={cn(
+              "mb-1 flex size-10 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              webSearch
+                ? "bg-primary/10 text-primary hover:bg-primary/15"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+            )}
+            onClick={() => setWebSearchEnabled(!webSearch)}
             title="MCP 웹검색 도구를 사용해 최신 웹 결과를 답변 근거에 포함합니다."
           >
-            <Globe className="size-4" />
-            <span className="hidden sm:inline">{webSearch ? "웹검색 ON" : "웹검색 OFF"}</span>
-          </Button>
+            <Globe className="size-5" />
+          </button>
           <Textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
@@ -292,7 +299,7 @@ export function ChatPage() {
               }
             }}
             placeholder="질문을 입력하세요"
-            className="max-h-44 min-h-[52px] resize-none border-0 shadow-none focus-visible:ring-0"
+            className="max-h-44 min-h-10 resize-none border-0 py-2 shadow-none focus-visible:ring-0"
           />
           <Button type={running ? "button" : "submit"} size="icon" onClick={running ? stop : undefined}>
             {running ? <StopCircle className="size-4" /> : <Send className="size-4" />}
