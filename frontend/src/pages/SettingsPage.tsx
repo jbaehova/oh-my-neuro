@@ -430,10 +430,10 @@ function TextSetting({
   }, [value]);
 
   return (
-    <label className="block">
+    <label className="flex h-full min-w-0 flex-col">
       <span className="text-xs font-medium text-foreground">{label}</span>
-      <p className="mt-1 min-h-10 text-xs leading-5 text-muted-foreground">{description}</p>
-      <div className="mt-2 flex gap-2">
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+      <div className="mt-auto flex gap-2 pt-2">
         <Input value={draft} onChange={(event) => setDraft(event.target.value)} />
         <Button variant="outline" size="icon" onClick={() => onSave(draft.trim())} type="button" title={`${label} 저장`}>
           <Save className="size-4" />
@@ -467,10 +467,10 @@ function NumberSetting({
   }, [value]);
 
   return (
-    <label className="block">
+    <label className="flex h-full min-w-0 flex-col">
       <span className="text-xs font-medium text-foreground">{label}</span>
-      <p className="mt-1 min-h-10 text-xs leading-5 text-muted-foreground">{description}</p>
-      <div className="mt-2 flex gap-2">
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+      <div className="mt-auto flex gap-2 pt-2">
         <Input
           type="number"
           min={min}
@@ -610,15 +610,15 @@ function McpSection({
         </Button>
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="overflow-hidden rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-secondary text-xs text-muted-foreground">
+      <div className="mt-5 space-y-4">
+        <div className="max-h-[220px] overflow-auto rounded-lg border bg-background/60">
+          <table className="w-full min-w-[560px] table-fixed text-sm md:min-w-0">
+            <thead className="sticky top-0 bg-secondary text-xs text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">서버</th>
-                <th className="hidden px-3 py-2 text-left font-medium md:table-cell">연결 방식</th>
-                <th className="hidden px-3 py-2 text-left font-medium lg:table-cell">엔드포인트</th>
-                <th className="px-3 py-2 text-right font-medium">관리</th>
+                <th className="w-[28%] px-3 py-2 text-left font-medium">서버</th>
+                <th className="w-[14%] px-3 py-2 text-left font-medium">연결 방식</th>
+                <th className="px-3 py-2 text-left font-medium">엔드포인트</th>
+                <th className="w-[92px] px-3 py-2 text-right font-medium">관리</th>
               </tr>
             </thead>
             <tbody>
@@ -640,9 +640,11 @@ function McpSection({
                         </div>
                       </div>
                     </td>
-                    <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">{server.transport}</td>
-                    <td className="hidden max-w-[280px] truncate px-3 py-2 text-muted-foreground lg:table-cell">
-                      {server.transport === "stdio" ? [server.command, ...(server.args || [])].filter(Boolean).join(" ") : server.url || "-"}
+                    <td className="px-3 py-2 text-muted-foreground">{server.transport}</td>
+                    <td className="min-w-0 px-3 py-2 text-muted-foreground">
+                      <div className="truncate">
+                        {server.transport === "stdio" ? [server.command, ...(server.args || [])].filter(Boolean).join(" ") : server.url || "-"}
+                      </div>
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex justify-end gap-1">
@@ -671,7 +673,7 @@ function McpSection({
             ) : null}
           </div>
 
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <Field label="서버 이름" help="영문, 숫자, '.', '_', '-'만 사용할 수 있습니다. 예: brave_search">
               <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
             </Field>
@@ -701,7 +703,7 @@ function McpSection({
                 </Field>
               </>
             ) : (
-              <Field label="URL" help="원격 MCP 서버의 전체 URL입니다.">
+              <Field className="lg:col-span-2" label="URL" help="원격 MCP 서버의 전체 URL입니다.">
                 <Input value={draft.url || ""} onChange={(event) => setDraft({ ...draft, url: event.target.value })} />
               </Field>
             )}
@@ -721,7 +723,7 @@ function McpSection({
                 />
               </Field>
             ) : null}
-            <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2">
+            <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 lg:col-span-2">
               <div>
                 <div className="text-xs font-medium">활성화</div>
                 <div className="mt-0.5 text-xs text-muted-foreground">OFF면 저장은 되지만 연결 대상에서 제외됩니다.</div>
@@ -750,9 +752,19 @@ function McpMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Field({ label, help, children }: { label: string; help: string; children: ReactNode }) {
+function Field({
+  label,
+  help,
+  children,
+  className,
+}: {
+  label: string;
+  help: string;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <label className="block">
+    <label className={["block", className].filter(Boolean).join(" ")}>
       <span className="text-xs font-medium">{label}</span>
       <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{help}</p>
       <div className="mt-1.5">{children}</div>
