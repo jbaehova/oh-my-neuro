@@ -20,6 +20,10 @@
   <img alt="Code Style Ruff" src="https://img.shields.io/badge/Code%20Style-Ruff-D7FF64">
 </p>
 
+<p align="center">
+  <img src="assets/oh-my-neuro-banner.png" alt="Oh My Neuro Pixel Art Banner" width="85%">
+</p>
+
 <p>
   <a href="#features">Features</a> •
   <a href="#architecture">Architecture</a> •
