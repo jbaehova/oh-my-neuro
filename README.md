@@ -363,7 +363,3 @@ There is no frontend test runner yet, so UI changes should be validated with ESL
 - The Settings API stores `OPENAI_API_KEY` in the project `.env` and returns only a boolean configured state.
 - External MCP servers may access network resources. Review `configs/mcp_servers.yaml` and user-added server specs before enabling them.
 - Vault file opening is path-checked against the configured Vault root.
-
-## License
-
-No license file is currently included in this repository.
