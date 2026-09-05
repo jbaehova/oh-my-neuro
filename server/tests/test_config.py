@@ -19,6 +19,11 @@ def test_blank_vault_path_is_unset() -> None:
     assert VaultSection(path="   ").path_abs is None
 
 
+def test_project_root_is_the_server_directory() -> None:
+    assert (PROJECT_ROOT / "pyproject.toml").is_file()
+    assert (PROJECT_ROOT / "configs" / "app.yaml").is_file()
+
+
 def test_wiki_directory_is_normalized() -> None:
     assert WikiSection(directory="/_omn_wiki/").directory == "_omn_wiki"
     assert "_omn_wiki" in VaultSection().excluded_dirs

@@ -15,15 +15,15 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_PATH = PROJECT_ROOT / ".env"
+
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(override=False)
+    load_dotenv(ENV_PATH, override=False)
 except Exception:  # pragma: no cover - dotenv optional
     pass
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _project_path(value: str | Path) -> Path:

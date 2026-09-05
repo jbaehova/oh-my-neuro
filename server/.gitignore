@@ -1,8 +1,6 @@
 .env
 .env.*
-!.env.example
 .agents/
-.docs/
 .mock_data
 AGENTS.md
 CLAUDE.md
@@ -20,12 +18,6 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
-# Frontend
-node_modules/
-frontend/node_modules/
-frontend/dist/
-npm-debug.log*
-
 # Data
 data/*
 !data/chroma/
@@ -40,8 +32,6 @@ data/uploads/*
 .idea/
 .vscode/
 
-# Git worktrees (superpowers development)
+# Git worktrees
 .worktrees/
-frontend/dist/
-.env
 app/vault/law_office_vault/

@@ -2,9 +2,14 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.api.main import create_app
+from app.api.main import CLIENT_DIST, create_app
 from app.api.routes import vault
 from app.config import AppConfig
+
+
+def test_client_build_path_targets_the_client_directory() -> None:
+    assert CLIENT_DIST.parent.name == "client"
+    assert CLIENT_DIST.name == "dist"
 
 
 def test_browse_rejects_request_without_app_header() -> None:

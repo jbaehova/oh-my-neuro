@@ -9,8 +9,9 @@ from app.config import AppConfig, get_config
 
 log = get_logger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+SERVER_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = SERVER_ROOT.parent
+CLIENT_DIST = REPOSITORY_ROOT / "client" / "dist"
 
 
 def create_app(cfg: AppConfig | None = None):
@@ -38,8 +39,8 @@ def create_app(cfg: AppConfig | None = None):
     app.include_router(wiki.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")
 
-    assets_dir = FRONTEND_DIST / "assets"
-    index_html = FRONTEND_DIST / "index.html"
+    assets_dir = CLIENT_DIST / "assets"
+    index_html = CLIENT_DIST / "index.html"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
@@ -48,7 +49,7 @@ def create_app(cfg: AppConfig | None = None):
         if index_html.exists():
             return FileResponse(index_html)
         return {
-            "message": "프론트엔드 빌드가 없습니다. 개발 중에는 `npm run dev --prefix frontend`를 실행하세요.",
+            "message": "프론트엔드 빌드가 없습니다. 개발 중에는 `npm run dev --prefix client`를 실행하세요.",
             "requested_path": path,
         }
 

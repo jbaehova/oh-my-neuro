@@ -17,7 +17,7 @@ When reporting a bug, include as much of the following information as possible:
 - Expected behavior and actual behavior
 - Steps to reproduce the issue
 - Relevant logs or screenshots
-- For configuration issues, sanitized details based on `configs/app.yaml`, `configs/mcp_servers.yaml`, or `.env.example`
+- For configuration issues, include sanitized details based on `server/configs/app.yaml`, `server/configs/mcp_servers.yaml`, or relevant environment variables.
 
 Do not include secrets, private document contents, tokens, or personal data in public issues.
 
@@ -27,26 +27,23 @@ Do not include secrets, private document contents, tokens, or personal data in p
 git clone <repo-url>
 cd oh-my-neuro
 
-uv venv --python 3.11
-source .venv/bin/activate
-uv pip install -e .[dev]
-
-npm ci --prefix frontend
-cp .env.example .env
+uv sync --project server --extra dev
+npm ci --prefix client
 ```
 
-Local execution requires `OPENAI_API_KEY`. If you use the bundled Korean law MCP server, configure `OPEN_LAW_ID` as well.
+Set `OPENAI_API_KEY` in your shell before starting the server, or add it from the Settings screen after startup. If you use the bundled Korean law MCP server, configure `OPEN_LAW_ID` as well.
 
 ```bash
-npm run build --prefix frontend
-oh-my-neuro ui
+export OPENAI_API_KEY=your_openai_api_key
+npm run build --prefix client
+uv run --project server oh-my-neuro ui
 ```
 
-For frontend development, run Vite separately:
+For client development, run Vite separately:
 
 ```bash
-npm run dev --prefix frontend
-oh-my-neuro ui
+npm run dev --prefix client
+uv run --project server oh-my-neuro ui
 ```
 
 ## Pull Request Guidelines
@@ -59,9 +56,9 @@ oh-my-neuro ui
 
 ## Code Style
 
-- Python code should follow the Python 3.11 target and the Ruff configuration in `pyproject.toml`.
+- Python code should follow the Python 3.11 target and the Ruff configuration in `server/pyproject.toml`.
 - Prefer the existing FastAPI router patterns and Pydantic schemas at API boundaries.
-- Frontend code should follow the existing Vite, React, TypeScript, Tailwind CSS, and `frontend/src/components` patterns.
+- Client code should follow the existing Vite, React, TypeScript, Tailwind CSS, and `client/src/components` patterns.
 - Treat user-provided Vault files, local configuration, and external MCP results as untrusted inputs.
 - Keep unrelated refactors, formatting churn, and large file moves separate from functional changes.
 
@@ -70,20 +67,20 @@ oh-my-neuro ui
 Before opening a pull request, run the commands that match your change:
 
 ```bash
-# Backend tests
-pytest
+# Server tests
+uv run --project server pytest server/tests
 
 # Python lint
-ruff check .
+uv run --project server ruff check server/app server/tests
 
-# Frontend lint
-npm run lint --prefix frontend
+# Client lint
+npm run lint --prefix client
 
-# Type-check and build frontend
-npm run build --prefix frontend
+# Type-check and build client
+npm run build --prefix client
 ```
 
-There is no frontend test runner yet, so UI changes should be validated with ESLint, the Vite production build, and a manual browser check.
+There is no client test runner yet, so UI changes should be validated with ESLint, the Vite production build, and a manual browser check.
 
 ## Documentation
 
